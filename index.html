@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimizador de Rutas (CVRP) con ACO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 8px solid #3498db;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .form-input {
+            transition: all 0.3s ease;
+        }
+        .form-input:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        .btn-primary {
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .file-drop-area {
+            transition: border .2s ease-in-out, background-color .2s ease-in-out;
+        }
+        .file-drop-area.dragover {
+            background-color: #e0f2fe;
+            border-color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">Optimizador de Rutas Vehiculares (CVRP)</h1>
+            <p class="text-lg text-gray-600 mt-2">Usando Algoritmo de Colonia de Hormigas (ACO)</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <!-- Panel de Control -->
+            <div class="lg:col-span-4 bg-white p-6 rounded-2xl shadow-lg">
+                <h2 class="text-2xl font-bold mb-6 border-b pb-3">Configuración</h2>
+                
+                <!-- Carga de Archivo -->
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Cargar Datos de Clientes (CSV)</label>
+                    <div id="file-drop-area" class="relative border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <input type="file" id="csv-file" accept=".csv" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                        <p id="file-label" class="text-gray-500">Arrastra y suelta un archivo CSV aquí, o haz clic para seleccionar.</p>
+                    </div>
+                     <button id="load-example-btn" class="w-full mt-3 bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 btn-primary">
+                        Usar Datos de Ejemplo
+                    </button>
+                </div>
+                
+                <!-- Parámetros del Problema -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label for="depot-lat" class="block text-sm font-medium text-gray-700">Latitud Depósito</label>
+                        <input type="number" id="depot-lat" value="3.90089" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                    </div>
+                    <div>
+                        <label for="depot-lon" class="block text-sm font-medium text-gray-700">Longitud Depósito</label>
+                        <input type="number" id="depot-lon" value="-76.29783" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                    </div>
+                    <div>
+                        <label for="n-vehicles" class="block text-sm font-medium text-gray-700">Nº Vehículos</label>
+                        <input type="number" id="n-vehicles" value="10" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                    </div>
+                    <div>
+                        <label for="vehicle-capacity" class="block text-sm font-medium text-gray-700">Capacidad Vehículo</label>
+                        <input type="number" id="vehicle-capacity" value="150" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                    </div>
+                </div>
+
+                <!-- Parámetros ACO -->
+                <details class="mb-4">
+                    <summary class="font-semibold cursor-pointer text-gray-700">Parámetros Avanzados (ACO)</summary>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 p-4 bg-gray-50 rounded-lg border">
+                        <div>
+                           <label for="n-ants" class="block text-sm font-medium text-gray-700">Nº Hormigas</label>
+                           <input type="number" id="n-ants" value="30" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                        <div>
+                           <label for="n-iterations" class="block text-sm font-medium text-gray-700">Nº Iteraciones</label>
+                           <input type="number" id="n-iterations" value="200" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                         <div>
+                           <label for="alpha" class="block text-sm font-medium text-gray-700">Alpha (α)</label>
+                           <input type="number" step="0.1" id="alpha" value="1.0" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                        <div>
+                           <label for="beta" class="block text-sm font-medium text-gray-700">Beta (β)</label>
+                           <input type="number" step="0.1" id="beta" value="2.0" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                        <div>
+                           <label for="rho" class="block text-sm font-medium text-gray-700">Rho (ρ)</label>
+                           <input type="number" step="0.01" id="rho" value="0.1" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                        <div>
+                           <label for="q-val" class="block text-sm font-medium text-gray-700">Q</label>
+                           <input type="number" id="q-val" value="100" class="form-input mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                    </div>
+                </details>
+
+                <button id="start-btn" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 btn-primary">
+                    Iniciar Optimización
+                </button>
+            </div>
+
+            <!-- Panel de Resultados -->
+            <div class="lg:col-span-8 bg-white p-6 rounded-2xl shadow-lg">
+                <h2 class="text-2xl font-bold mb-4 border-b pb-3">Resultados</h2>
+                <div id="results-container" class="space-y-6">
+                    <div id="loader-container" class="hidden flex-col items-center justify-center h-96">
+                        <div class="loader"></div>
+                        <p id="progress-text" class="mt-4 text-lg text-gray-600">Optimizando rutas...</p>
+                    </div>
+                    <div id="plot-container" class="w-full h-[500px] bg-gray-50 rounded-lg"></div>
+                    <div id="summary-container"></div>
+                    <div id="details-container"></div>
+                    <div id="welcome-message" class="text-center text-gray-500 py-20">
+                        <h3 class="text-2xl font-semibold">Bienvenido</h3>
+                        <p class="mt-2">Carga un archivo CSV o usa los datos de ejemplo para comenzar.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+         <footer class="text-center mt-10 text-gray-500 text-sm">
+            <p>Análisis y potenciación de código por IA. Lógica del algoritmo ACO migrada desde Python a JavaScript.</p>
+        </footer>
+    </div>
+
+    <script>
+        // --- INICIO DE LA LÓGICA DEL SOLUCIONADOR ACO (MIGRADA DE PYTHON) ---
+        
+        /**
+         * Clase que implementa el algoritmo de optimización por colonia de hormigas para el CVRP.
+         * Esta es una migración directa de la clase de Python `ACO_CVRP_Solver`.
+         */
+        class ACO_CVRP_Solver_JS {
+            constructor(depotCoord, customerCoords, customerDemands, nVehicles, vehicleCapacity, params) {
+                // Parámetros del problema
+                this.depotCoord = depotCoord; // [lon, lat]
+                this.customerCoords = customerCoords;
+                this.customerDemands = customerDemands.map(d => parseFloat(d));
+                
+                this.citiesCoords = [this.depotCoord, ...this.customerCoords];
+                this.demands = [0.0, ...this.customerDemands];
+                
+                this.nCities = this.citiesCoords.length;
+                this.nCustomers = this.customerCoords.length;
+                this.nVehicles = nVehicles;
+                this.vehicleCapacity = parseFloat(vehicleCapacity);
+                this.effectiveVehicleCapacity = this.vehicleCapacity * 1.05; // 5% de sobrecupo
+                
+                this.depotIndex = 0;
+
+                // Parámetros del algoritmo ACO
+                this.alpha = params.alpha; // Influencia de la feromona
+                this.beta = params.beta;   // Influencia de la visibilidad (distancia)
+                this.rho = params.rho;     // Tasa de evaporación de la feromona
+                this.Q = params.Q;         // Cantidad de feromona a depositar
+                
+                // Inicialización de matrices
+                this.distances = this._calculateDistanceMatrixHaversine();
+                this.pheromones = this._initializePheromones();
+            }
+
+            /**
+             * Calcula la distancia haversine entre dos puntos geográficos.
+             */
+            _haversineDistance(lat1, lon1, lat2, lon2) {
+                const R = 6371; // Radio de la Tierra en km
+                const toRad = val => val * Math.PI / 180;
+                
+                const dLat = toRad(lat2 - lat1);
+                const dLon = toRad(lon2 - lon1);
+                lat1 = toRad(lat1);
+                lat2 = toRad(lat2);
+
+                const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+                const c = 2 * Math.asin(Math.sqrt(a));
+                return R * c;
+            }
+
+            /**
+             * Calcula y almacena la matriz de distancias entre todas las ciudades (depósito y clientes).
+             */
+            _calculateDistanceMatrixHaversine() {
+                const distances = Array(this.nCities).fill(0).map(() => Array(this.nCities).fill(0));
+                for (let i = 0; i < this.nCities; i++) {
+                    for (let j = i; j < this.nCities; j++) {
+                        if (i !== j) {
+                            const [lon1, lat1] = this.citiesCoords[i];
+                            const [lon2, lat2] = this.citiesCoords[j];
+                            const dist = this._haversineDistance(lat1, lon1, lat2, lon2);
+                            distances[i][j] = dist;
+                            distances[j][i] = dist;
+                        }
+                    }
+                }
+                return distances;
+            }
+            
+            _initializePheromones() {
+                 return Array(this.nCities).fill(0).map(() => Array(this.nCities).fill(1.0));
+            }
+
+            /**
+             * Selecciona la siguiente ciudad para una hormiga basándose en feromonas y distancias.
+             */
+            _selectNextCity(currentCityIdx, unvisitedCustomers, currentLoad) {
+                const feasibleCustomers = unvisitedCustomers.filter(
+                    custIdx => currentLoad + this.demands[custIdx] <= this.effectiveVehicleCapacity
+                );
+
+                if (feasibleCustomers.length === 0) return null;
+
+                const probabilities = feasibleCustomers.map(custIdx => {
+                    const distance = this.distances[currentCityIdx][custIdx];
+                    const visibility = distance === 0 ? 1e9 : 1.0 / distance;
+                    return (this.pheromones[currentCityIdx][custIdx] ** this.alpha) * (visibility ** this.beta);
+                });
+
+                const sumProbabilities = probabilities.reduce((a, b) => a + b, 0);
+                if (sumProbabilities === 0) {
+                    return feasibleCustomers[Math.floor(Math.random() * feasibleCustomers.length)];
+                }
+
+                const normalizedProbs = probabilities.map(p => p / sumProbabilities);
+                
+                // Ruleta de selección
+                const rand = Math.random();
+                let cumulativeProb = 0;
+                for (let i = 0; i < feasibleCustomers.length; i++) {
+                    cumulativeProb += normalizedProbs[i];
+                    if (rand <= cumulativeProb) {
+                        return feasibleCustomers[i];
+                    }
+                }
+                
+                // Fallback por si hay errores de punto flotante
+                return feasibleCustomers[feasibleCustomers.length - 1];
+            }
+
+            /**
+             * Construye una solución completa (un conjunto de rutas) para una hormiga.
+             */
+            _constructSolutionForAnt() {
+                let solutionRoutes = [];
+                let solutionTotalCost = 0.0;
+                let unvisitedCustomers = Array.from({length: this.nCustomers}, (_, i) => i + 1);
+                
+                // Shuffle para introducir aleatoriedad
+                unvisitedCustomers.sort(() => 0.5 - Math.random());
+
+                let vehiclesUsed = 0;
+                while (unvisitedCustomers.length > 0 && vehiclesUsed < this.nVehicles) {
+                    vehiclesUsed++;
+                    let currentRoute = [this.depotIndex];
+                    let currentCityIdx = this.depotIndex;
+                    let currentLoad = 0.0;
+                    let routeCost = 0.0;
+
+                    while (true) {
+                        const nextCustomerIdx = this._selectNextCity(currentCityIdx, unvisitedCustomers, currentLoad);
+                        if (nextCustomerIdx === null) break;
+
+                        currentLoad += this.demands[nextCustomerIdx];
+                        routeCost += this.distances[currentCityIdx][nextCustomerIdx];
+                        currentRoute.push(nextCustomerIdx);
+                        unvisitedCustomers = unvisitedCustomers.filter(c => c !== nextCustomerIdx);
+                        currentCityIdx = nextCustomerIdx;
+                    }
+
+                    routeCost += this.distances[currentCityIdx][this.depotIndex];
+                    currentRoute.push(this.depotIndex);
+
+                    if (currentRoute.length > 2) {
+                        solutionRoutes.push(currentRoute);
+                        solutionTotalCost += routeCost;
+                    }
+                }
+
+                return { routes: solutionRoutes, cost: solutionTotalCost, unvisited: unvisitedCustomers };
+            }
+
+            /**
+             * El bucle principal del algoritmo que ejecuta las iteraciones.
+             */
+            async solve(nAnts, nIterations, progressCallback) {
+                let bestOverallSolution = { routes: null, cost: Infinity };
+
+                for (let iter = 0; iter < nIterations; iter++) {
+                    let iterationSolutions = [];
+                    for (let ant = 0; ant < nAnts; ant++) {
+                        const { routes, cost, unvisited } = this._constructSolutionForAnt();
+                        
+                        // Solo considerar soluciones válidas (todos los clientes visitados)
+                        if (unvisited.length === 0) {
+                             iterationSolutions.push({ routes, cost });
+                            if (cost < bestOverallSolution.cost) {
+                                bestOverallSolution = { routes, cost };
+                            }
+                        }
+                    }
+
+                    // Actualización de feromonas
+                    // 1. Evaporación
+                    for (let i = 0; i < this.nCities; i++) {
+                        for (let j = 0; j < this.nCities; j++) {
+                            this.pheromones[i][j] *= (1.0 - this.rho);
+                        }
+                    }
+
+                    // 2. Depósito
+                    if(iterationSolutions.length > 0) {
+                        for (const sol of iterationSolutions) {
+                            if (sol.cost > 0) {
+                                const depositValue = this.Q / sol.cost;
+                                for (const route of sol.routes) {
+                                    for (let i = 0; i < route.length - 1; i++) {
+                                        const city1 = route[i];
+                                        const city2 = route[i+1];
+                                        this.pheromones[city1][city2] += depositValue;
+                                        this.pheromones[city2][city1] += depositValue; // Simétrico
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (progressCallback) {
+                       await progressCallback(iter + 1, nIterations, bestOverallSolution.cost);
+                    }
+                }
+                
+                return bestOverallSolution;
+            }
+            
+            /**
+             * Genera un reporte detallado de la solución encontrada.
+             */
+            evaluateSolution(solution) {
+                 if (!solution || !solution.routes) return null;
+
+                const metrics = {};
+                metrics.numVehiclesUsed = solution.routes.length;
+                metrics.totalDistanceKm = solution.cost;
+                metrics.routeDetails = [];
+                let allVisitedCustomers = new Set();
+                let totalDemandServiced = 0;
+
+                for (const route of solution.routes) {
+                    let dist = 0;
+                    for (let i = 0; i < route.length - 1; i++) {
+                        dist += this.distances[route[i]][route[i+1]];
+                    }
+                    const routeCustomers = route.slice(1, -1);
+                    const load = routeCustomers.reduce((sum, cityIdx) => sum + this.demands[cityIdx], 0);
+                    const utilPercentNominal = (load / this.vehicleCapacity) * 100;
+                    
+                    metrics.routeDetails.push({
+                        sequence: routeCustomers,
+                        distance: dist,
+                        load: load,
+                        stops: routeCustomers.length,
+                        utilization: utilPercentNominal
+                    });
+                    
+                    routeCustomers.forEach(c => allVisitedCustomers.add(c));
+                    totalDemandServiced += load;
+                }
+                
+                metrics.customersVisitedCount = allVisitedCustomers.size;
+                metrics.allCustomersServiced = metrics.customersVisitedCount === this.nCustomers;
+                
+                const numUsed = metrics.numVehiclesUsed;
+                if (numUsed > 0 && this.vehicleCapacity > 0) {
+                    metrics.avgVehicleUtilizationPercent = (totalDemandServiced / (numUsed * this.vehicleCapacity)) * 100;
+                } else {
+                    metrics.avgVehicleUtilizationPercent = 0;
+                }
+                
+                return metrics;
+            }
+        }
+        
+        // --- FIN DE LA LÓGICA DEL SOLUCIONADOR ---
+
+        // --- LÓGICA DE LA INTERFAZ DE USUARIO (UI) ---
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            // Elementos de la UI
+            const startBtn = document.getElementById('start-btn');
+            const loadExampleBtn = document.getElementById('load-example-btn');
+            const csvFileInput = document.getElementById('csv-file');
+            const fileDropArea = document.getElementById('file-drop-area');
+            const fileLabel = document.getElementById('file-label');
+            const welcomeMessage = document.getElementById('welcome-message');
+            
+            const resultsContainer = document.getElementById('results-container');
+            const loaderContainer = document.getElementById('loader-container');
+            const progressText = document.getElementById('progress-text');
+            const plotContainer = document.getElementById('plot-container');
+            const summaryContainer = document.getElementById('summary-container');
+            const detailsContainer = document.getElementById('details-container');
+            
+            let customerData = null;
+            
+            // Datos de ejemplo (del archivo SIMULACION.csv)
+            const exampleCSVData = `Cliente,Latitud_Aproximada,Longitud_Aproximada,CTD Paquetes
+1,3.87103,-76.3117,8
+2,3.87163,-76.3168,14
+3,3.87227,-76.3201,3
+4,3.86949,-76.3129,20
+5,3.86733,-76.3148,15
+6,3.86906,-76.3023,12
+7,3.87413,-76.2952,16
+8,3.87971,-76.2942,9
+9,3.88373,-76.2941,18
+10,3.88909,-76.2917,11
+11,3.89667,-76.2933,7
+12,3.90119,-76.3045,13
+13,3.90565,-76.3094,5
+14,3.90906,-76.3168,17
+15,3.91427,-76.3204,19
+16,3.92131,-76.3221,4
+17,3.92842,-76.3162,10
+18,3.93189,-76.3051,21
+19,3.92642,-76.3006,6
+20,3.92083,-76.2982,1
+21,3.91501,-76.2923,2
+22,3.90999,-76.2847,22
+23,3.90382,-76.2801,23
+24,3.89694,-76.2798,24
+25,3.89112,-76.2858,25
+26,3.88631,-76.2882,26
+27,3.88126,-76.2831,27
+28,3.87889,-76.2891,28
+29,3.8856,-76.321,29
+30,3.8945,-76.323,30`;
+            
+            // --- Manejadores de eventos ---
+            
+            loadExampleBtn.addEventListener('click', () => {
+                customerData = parseCSV(exampleCSVData);
+                fileLabel.textContent = `Ejemplo cargado (${customerData.coords.length} clientes)`;
+                fileLabel.classList.add('text-green-600', 'font-semibold');
+                welcomeMessage.classList.add('hidden');
+            });
+            
+            startBtn.addEventListener('click', runOptimization);
+            
+            // Manejadores para arrastrar y soltar archivo
+            fileDropArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                fileDropArea.classList.add('dragover');
+            });
+            fileDropArea.addEventListener('dragleave', () => {
+                fileDropArea.classList.remove('dragover');
+            });
+            fileDropArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                fileDropArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    csvFileInput.files = files;
+                    handleFile(files[0]);
+                }
+            });
+            csvFileInput.addEventListener('change', (e) => {
+                 if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+            
+            // --- Funciones principales ---
+
+            function handleFile(file) {
+                if(file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            customerData = parseCSV(e.target.result);
+                             if (!customerData || customerData.coords.length === 0) {
+                                throw new Error("El archivo CSV está vacío o tiene un formato incorrecto.");
+                            }
+                            fileLabel.textContent = `${file.name} (${customerData.coords.length} clientes)`;
+                            fileLabel.classList.add('text-green-600', 'font-semibold');
+                            welcomeMessage.classList.add('hidden');
+                        } catch(error) {
+                            alert(`Error al procesar el archivo: ${error.message}`);
+                            fileLabel.textContent = 'Error al cargar. Intenta de nuevo.';
+                            fileLabel.classList.add('text-red-600', 'font-semibold');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            }
+            
+            function parseCSV(csvText) {
+                const lines = csvText.trim().split('\n');
+                const header = lines.shift().trim().split(',');
+                
+                // Detección flexible de columnas
+                const detectColumn = (options) => {
+                    for(const opt of options) {
+                        const index = header.findIndex(h => h.trim().toLowerCase() === opt.toLowerCase());
+                        if (index !== -1) return index;
+                    }
+                    return -1;
+                };
+
+                const latIdx = detectColumn(['latitud_aproximada', 'latitud', 'lat']);
+                const lonIdx = detectColumn(['longitud_aproximada', 'longitud', 'lon']);
+                const demandIdx = detectColumn(['ctd paquetes', 'volumen_operacion_estimado', 'demanda', 'demand']);
+
+                if (latIdx === -1 || lonIdx === -1 || demandIdx === -1) {
+                    throw new Error(`No se encontraron las columnas requeridas (latitud, longitud, demanda). Columnas encontradas: ${header.join(', ')}`);
+                }
+
+                const coords = [];
+                const demands = [];
+                lines.forEach(line => {
+                    const values = line.trim().split(',');
+                    if (values.length >= header.length) {
+                        const lat = parseFloat(values[latIdx].trim().replace(',', '.'));
+                        const lon = parseFloat(values[lonIdx].trim().replace(',', '.'));
+                        const demand = parseFloat(values[demandIdx].trim().replace(',', '.'));
+                        if (!isNaN(lat) && !isNaN(lon) && !isNaN(demand)) {
+                            coords.push([lon, lat]);
+                            demands.push(demand);
+                        }
+                    }
+                });
+                return { coords, demands };
+            }
+
+            async function runOptimization() {
+                if (!customerData) {
+                    alert("Por favor, carga un archivo de datos de clientes o usa el ejemplo.");
+                    return;
+                }
+
+                // Obtener parámetros de la UI
+                const depotCoord = [
+                    parseFloat(document.getElementById('depot-lon').value),
+                    parseFloat(document.getElementById('depot-lat').value)
+                ];
+                const nVehicles = parseInt(document.getElementById('n-vehicles').value);
+                const vehicleCapacity = parseFloat(document.getElementById('vehicle-capacity').value);
+                
+                const nAnts = parseInt(document.getElementById('n-ants').value);
+                const nIterations = parseInt(document.getElementById('n-iterations').value);
+
+                const acoParams = {
+                    alpha: parseFloat(document.getElementById('alpha').value),
+                    beta: parseFloat(document.getElementById('beta').value),
+                    rho: parseFloat(document.getElementById('rho').value),
+                    Q: parseFloat(document.getElementById('q-val').value)
+                };
+
+                // Validaciones
+                if (isNaN(depotCoord[0]) || isNaN(depotCoord[1]) || isNaN(nVehicles) || isNaN(vehicleCapacity) || isNaN(nAnts) || isNaN(nIterations)) {
+                    alert("Por favor, asegúrate de que todos los parámetros de configuración sean números válidos.");
+                    return;
+                }
+
+                // Preparar UI para la ejecución
+                loaderContainer.classList.remove('hidden');
+                loaderContainer.classList.add('flex');
+                plotContainer.innerHTML = '';
+                summaryContainer.innerHTML = '';
+                detailsContainer.innerHTML = '';
+                startBtn.disabled = true;
+                startBtn.textContent = 'Optimizando...';
+                welcomeMessage.classList.add('hidden');
+
+                // Crear y ejecutar el solucionador (de forma asíncrona para no bloquear la UI)
+                await new Promise(resolve => setTimeout(resolve, 100)); // Permite que la UI se actualice
+
+                try {
+                    const solver = new ACO_CVRP_Solver_JS(
+                        depotCoord,
+                        customerData.coords,
+                        customerData.demands,
+                        nVehicles,
+                        vehicleCapacity,
+                        acoParams
+                    );
+    
+                    const progressCallback = async (iter, total, bestCost) => {
+                        progressText.textContent = `Iteración ${iter} / ${total}. Mejor costo: ${bestCost === Infinity ? 'N/A' : bestCost.toFixed(2)} km`;
+                        // Pequeña pausa para permitir que el navegador repinte la pantalla
+                        if (iter % 10 === 0) {
+                           await new Promise(resolve => setTimeout(resolve, 10)); 
+                        }
+                    };
+    
+                    const bestSolution = await solver.solve(nAnts, nIterations, progressCallback);
+                    const evaluation = solver.evaluateSolution(bestSolution);
+    
+                    // Mostrar resultados
+                    displayResults(bestSolution, evaluation, solver);
+
+                } catch (error) {
+                    console.error("Error durante la optimización:", error);
+                    alert("Ocurrió un error inesperado durante la optimización. Revisa la consola para más detalles.");
+                }
+
+
+                // Finalizar
+                loaderContainer.classList.add('hidden');
+                loaderContainer.classList.remove('flex');
+                startBtn.disabled = false;
+                startBtn.textContent = 'Iniciar Optimización';
+            }
+            
+            function displayResults(solution, evaluation, solver) {
+                if (!solution || !solution.routes || !evaluation) {
+                    summaryContainer.innerHTML = `
+                        <div class="text-center p-8 bg-red-50 border border-red-200 rounded-lg">
+                            <h3 class="text-xl font-bold text-red-700">No se encontró una solución válida</h3>
+                            <p class="text-red-600 mt-2">No se pudo encontrar una ruta que visite a todos los clientes con las restricciones dadas. Prueba aumentando el número de iteraciones/hormigas, o ajustando la capacidad y número de vehículos.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // 1. Plot
+                plotSolution(solution.routes, solver);
+
+                // 2. Resumen
+                summaryContainer.innerHTML = `
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div class="p-4 bg-blue-50 rounded-lg">
+                            <p class="text-sm text-blue-600 font-medium">Costo Total</p>
+                            <p class="text-2xl font-bold text-blue-800">${evaluation.totalDistanceKm.toFixed(2)} km</p>
+                        </div>
+                         <div class="p-4 bg-green-50 rounded-lg">
+                            <p class="text-sm text-green-600 font-medium">Vehículos Usados</p>
+                            <p class="text-2xl font-bold text-green-800">${evaluation.numVehiclesUsed} / ${solver.nVehicles}</p>
+                        </div>
+                        <div class="p-4 bg-yellow-50 rounded-lg">
+                            <p class="text-sm text-yellow-600 font-medium">Clientes Visitados</p>
+                            <p class="text-2xl font-bold text-yellow-800">${evaluation.customersVisitedCount} / ${solver.nCustomers}</p>
+                        </div>
+                        <div class="p-4 bg-purple-50 rounded-lg">
+                            <p class="text-sm text-purple-600 font-medium">Uso Promedio Capacidad</p>
+                            <p class="text-2xl font-bold text-purple-800">${evaluation.avgVehicleUtilizationPercent.toFixed(1)}%</p>
+                        </div>
+                    </div>
+                `;
+                
+                // 3. Detalles por ruta
+                let detailsHtml = '<h3 class="text-xl font-bold mt-6 mb-4">Detalles por Ruta</h3><div class="space-y-4">';
+                evaluation.routeDetails.forEach((route, i) => {
+                     const routeColor = Plotly.d3.scale.category20().range()[i % 20];
+                    detailsHtml += `
+                        <div class="border-l-4 p-4 rounded-r-lg bg-gray-50" style="border-color: ${routeColor};">
+                           <div class="flex justify-between items-center font-bold">
+                               <span class="text-lg">Ruta ${i + 1}</span>
+                               <span class="text-sm text-gray-600">${route.stops} paradas</span>
+                           </div>
+                           <div class="grid grid-cols-2 gap-2 mt-2 text-sm">
+                               <div><strong>Distancia:</strong> ${route.distance.toFixed(2)} km</div>
+                               <div><strong>Carga:</strong> ${route.load.toFixed(0)} (${route.utilization.toFixed(1)}%)</div>
+                           </div>
+                           <div class="mt-2 text-xs text-gray-500 break-words">
+                               <strong>Secuencia:</strong> D -> ${route.sequence.join(' -> ')} -> D
+                           </div>
+                        </div>
+                    `;
+                });
+                detailsHtml += '</div>';
+                detailsContainer.innerHTML = detailsHtml;
+            }
+            
+            function plotSolution(routes, solver) {
+                const traces = [];
+                
+                // 1. Depósito
+                traces.push({
+                    x: [solver.depotCoord[0]],
+                    y: [solver.depotCoord[1]],
+                    mode: 'markers+text',
+                    type: 'scatter',
+                    name: 'Depósito',
+                    marker: { color: 'red', size: 18, symbol: 'star' },
+                    text: ['Depósito (0)'],
+                    textposition: 'top center',
+                    textfont: { color: 'black', size: 12, family: 'Inter' }
+                });
+                
+                // 2. Clientes
+                const customerX = solver.customerCoords.map(c => c[0]);
+                const customerY = solver.customerCoords.map(c => c[1]);
+                const customerText = solver.customerCoords.map((_, i) => `Cliente ${i+1}<br>Demanda: ${solver.demands[i+1]}`);
+                 traces.push({
+                    x: customerX,
+                    y: customerY,
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: 'Clientes',
+                    marker: { color: 'blue', size: 8 },
+                    hoverinfo: 'text',
+                    text: customerText
+                });
+                
+                // 3. Rutas
+                routes.forEach((route, i) => {
+                    const routeX = route.map(cityIdx => solver.citiesCoords[cityIdx][0]);
+                    const routeY = route.map(cityIdx => solver.citiesCoords[cityIdx][1]);
+                    const routeColor = Plotly.d3.scale.category20().range()[i % 20];
+                    const routeDetails = solver.evaluateSolution({routes:[route], cost:0}).routeDetails[0];
+
+                    traces.push({
+                         x: routeX,
+                         y: routeY,
+                         mode: 'lines+markers',
+                         type: 'scatter',
+                         name: `Ruta ${i+1} (${routeDetails.distance.toFixed(1)} km, ${routeDetails.load.toFixed(0)} U)`,
+                         line: { color: routeColor, width: 2 },
+                         marker: {size: 5}
+                    });
+                });
+                
+                const layout = {
+                    title: '<b>Mejor Solución de Ruteo Encontrada</b>',
+                    xaxis: { title: 'Longitud', zeroline: false },
+                    yaxis: { title: 'Latitud', zeroline: false },
+                    showlegend: true,
+                    legend: {
+                        orientation: 'v',
+                        bgcolor: 'rgba(255,255,255,0.8)',
+                        bordercolor: '#CCCCCC',
+                        borderwidth: 1,
+                        x: 1.05,
+                        y: 1
+                    },
+                    margin: { l: 60, r: 200, b: 50, t: 50, pad: 4 },
+                    hovermode: 'closest',
+                    paper_bgcolor: '#f9fafb',
+                    plot_bgcolor: '#ffffff'
+                };
+                
+                Plotly.newPlot('plot-container', traces, layout, {responsive: true});
+            }
+
+        });
+    </script>
+</body>
+</html>
