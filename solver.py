@@ -1,6 +1,6 @@
 # solver.py
 # Contiene la clase ACO_CVRP_Solver con la lógica del algoritmo.
-# (Sin cambios respecto a la versión anterior)
+# Versión potenciada con Elitismo y Búsqueda Local 2-opt.
 
 import numpy as np
 import random
@@ -9,14 +9,14 @@ from math import radians, sin, cos, sqrt, asin
 class ACO_CVRP_Solver:
     """
     Resuelve el Problema de Ruteo de Vehículos con Capacidad (CVRP)
-    utilizando un algoritmo de Optimización por Colonia de Hormigas (ACO).
+    utilizando un algoritmo de Optimización por Colonia de Hormigas (ACO)
+    potenciado con Elitismo y Búsqueda Local 2-opt.
     """
-    def __init__(self, depot_coord, customer_coords, customer_demands, n_vehicles, vehicle_capacity, params):
+    def __init__(self, depot_coord, customer_coords, customer_demands, n_vehicles, vehicle_capacity, params, use_2_opt=True, elitism_weight=1.0):
         self.depot_coord = depot_coord
         self.customer_coords = customer_coords
         self.customer_demands = [float(d) for d in customer_demands]
         
-        # El índice 0 es el depósito
         self.cities_coords = [self.depot_coord] + self.customer_coords
         self.demands = [0.0] + self.customer_demands
         
@@ -24,7 +24,6 @@ class ACO_CVRP_Solver:
         self.n_customers = len(self.customer_coords)
         self.n_vehicles = n_vehicles
         self.vehicle_capacity = float(vehicle_capacity)
-        # Permitir una ligera sobrecapacidad para encontrar soluciones más fácilmente
         self.effective_vehicle_capacity = self.vehicle_capacity * 1.05
 
         self.depot_index = 0
@@ -36,12 +35,14 @@ class ACO_CVRP_Solver:
         self.rho = float(params.get('rho', 0.1))
         self.Q = float(params.get('Q', 100))
         
-        # Inicialización de la matriz de feromonas
+        # Parámetros de mejoras
+        self.use_2_opt = use_2_opt
+        self.elitism_weight = float(elitism_weight)
+
         self.pheromones = np.ones((self.n_cities, self.n_cities))
 
     def _haversine_distance(self, lat1, lon1, lat2, lon2):
-        """Calcula la distancia Haversine entre dos puntos geográficos en km."""
-        R = 6371  # Radio de la Tierra en km
+        R = 6371
         lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
         dlon = lon2_rad - lon1_rad
         dlat = lat2_rad - lat1_rad
@@ -50,7 +51,6 @@ class ACO_CVRP_Solver:
         return R * c
 
     def _calculate_distance_matrix_haversine(self):
-        """Pre-calcula la matriz de distancias entre todas las ubicaciones."""
         n = self.n_cities
         distances = np.zeros((n, n))
         for i in range(n):
@@ -59,142 +59,152 @@ class ACO_CVRP_Solver:
                 lon2, lat2 = self.cities_coords[j]
                 dist = self._haversine_distance(lat1, lon1, lat2, lon2)
                 distances[i, j] = distances[j, i] = dist
-        return distances.tolist()
+        return distances
 
-    def _select_next_city(self, current_city_idx, unvisited_customers_global_indices, current_vehicle_load):
-        """
-        Selecciona la siguiente ciudad para una hormiga, considerando la capacidad del vehículo,
-        la distancia (visibilidad) y el rastro de feromonas.
-        """
+    def _select_next_city(self, current_city_idx, unvisited_customers, current_vehicle_load):
         feasible_customers = [
-            cust_idx for cust_idx in unvisited_customers_global_indices
+            cust_idx for cust_idx in unvisited_customers
             if current_vehicle_load + self.demands[cust_idx] <= self.effective_vehicle_capacity
         ]
-        
         if not feasible_customers:
             return None
 
-        probabilities = np.zeros(len(feasible_customers))
-        for i, customer_idx in enumerate(feasible_customers):
-            distance = self.distances[current_city_idx][customer_idx]
-            # La visibilidad es el inverso de la distancia
-            visibility = 1.0 / distance if distance > 0 else 1e9
-            
-            pheromone_level = self.pheromones[current_city_idx, customer_idx]
-            probabilities[i] = (pheromone_level ** self.alpha) * (visibility ** self.beta)
+        probabilities = []
+        for customer_idx in feasible_customers:
+            distance = self.distances[current_city_idx, customer_idx]
+            visibility = (1.0 / distance) if distance > 0 else 1e9
+            pheromone = self.pheromones[current_city_idx, customer_idx]
+            probabilities.append((pheromone ** self.alpha) * (visibility ** self.beta))
         
-        sum_probabilities = np.sum(probabilities)
+        sum_probabilities = sum(probabilities)
         if sum_probabilities == 0:
-            # Si todas las probabilidades son cero, elige uno al azar
             return random.choice(feasible_customers)
 
-        probabilities /= sum_probabilities
-        selected_local_idx = np.random.choice(len(feasible_customers), p=probabilities)
-        return feasible_customers[selected_local_idx]
+        probabilities = [p / sum_probabilities for p in probabilities]
+        return random.choices(feasible_customers, weights=probabilities, k=1)[0]
+    
+    def _two_opt(self, route):
+        """Mejora una ruta individual usando la heurística 2-opt."""
+        if len(route) <= 4: # No se puede optimizar una ruta con 2 o menos clientes
+            return route
+        
+        improved = True
+        while improved:
+            improved = False
+            for i in range(1, len(route) - 2):
+                for j in range(i + 1, len(route)):
+                    if j == i + 1: continue
+                    
+                    # Nodos actuales: (i-1, i) y (j-1, j)
+                    # Nuevos nodos: (i-1, j-1) y (i, j)
+                    current_dist = self.distances[route[i-1], route[i]] + self.distances[route[j-1], route[j]]
+                    new_dist = self.distances[route[i-1], route[j-1]] + self.distances[route[i], route[j]]
+
+                    if new_dist < current_dist:
+                        # Realizar el intercambio
+                        route[i:j] = route[j-1:i-1:-1]
+                        improved = True
+        return route
+
 
     def _construct_solution_for_ant(self):
-        """Construye una solución completa (conjunto de rutas) para una hormiga."""
         solution_routes = []
-        solution_total_cost = 0.0
-        unvisited_global_customer_indices = list(range(1, self.n_cities))
-        random.shuffle(unvisited_global_customer_indices)
-        num_vehicles_used = 0
-
-        while unvisited_global_customer_indices and num_vehicles_used < self.n_vehicles:
-            num_vehicles_used += 1
+        unvisited = list(range(1, self.n_cities))
+        random.shuffle(unvisited)
+        
+        for _ in range(self.n_vehicles):
+            if not unvisited: break
+            
             current_route = [self.depot_index]
-            current_city_idx = self.depot_index
-            current_vehicle_load = 0.0
-            route_cost = 0.0
+            current_city = self.depot_index
+            current_load = 0.0
 
-            while True:
-                next_customer_idx = self._select_next_city(
-                    current_city_idx, 
-                    unvisited_global_customer_indices, 
-                    current_vehicle_load
-                )
-                
-                if next_customer_idx is None:
-                    # No más clientes factibles para esta ruta
-                    break
-                
-                current_vehicle_load += self.demands[next_customer_idx]
-                route_cost += self.distances[current_city_idx][next_customer_idx]
-                current_route.append(next_customer_idx)
-                unvisited_global_customer_indices.remove(next_customer_idx)
-                current_city_idx = next_customer_idx
+            while unvisited:
+                next_city = self._select_next_city(current_city, unvisited, current_load)
+                if next_city is None: break
 
-            # Regresar al depósito
-            route_cost += self.distances[current_city_idx][self.depot_index]
+                current_load += self.demands[next_city]
+                current_route.append(next_city)
+                unvisited.remove(next_city)
+                current_city = next_city
+            
             current_route.append(self.depot_index)
             
-            if len(current_route) > 2:  # Ruta válida (más que solo Depósito -> Depósito)
-                solution_routes.append(current_route)
-                solution_total_cost += route_cost
-        
-        return solution_routes, solution_total_cost, unvisited_global_customer_indices
+            # Aplicar búsqueda local 2-opt si está habilitada
+            if self.use_2_opt:
+                current_route = self._two_opt(current_route)
 
-    def solve(self, n_ants=10, n_iterations=100, progress_callback=None):
-        """
-        Ejecuta el bucle principal del algoritmo ACO.
-        """
-        best_overall_solution_routes = None
+            if len(current_route) > 2:
+                solution_routes.append(current_route)
+        
+        cost = sum(self.distances[route[i], route[i+1]] for route in solution_routes for i in range(len(route)-1))
+        
+        return solution_routes, cost, unvisited
+
+    def solve(self, n_ants, n_iterations, progress_callback=None):
+        best_overall_routes = None
         best_overall_cost = float('inf')
 
         for iteration in range(n_iterations):
-            iteration_valid_solutions = []
+            iteration_solutions = []
             for _ in range(n_ants):
                 routes, cost, unvisited = self._construct_solution_for_ant()
-                # Una solución es válida solo si todos los clientes fueron visitados
                 if not unvisited:
-                    iteration_valid_solutions.append({'routes': routes, 'cost': cost})
+                    iteration_solutions.append({'routes': routes, 'cost': cost})
                     if cost < best_overall_cost:
                         best_overall_cost = cost
-                        best_overall_solution_routes = routes
+                        best_overall_routes = routes
 
-            # Evaporación de feromonas
+            # 1. Evaporación de feromonas
             self.pheromones *= (1.0 - self.rho)
 
-            # Depósito de feromonas por las hormigas que encontraron soluciones válidas
-            if iteration_valid_solutions:
-                for sol_info in iteration_valid_solutions:
-                    if sol_info['cost'] > 0:
-                        deposit_value = self.Q / sol_info['cost']
-                        for route in sol_info['routes']:
-                            for i in range(len(route) - 1):
-                                city1_idx, city2_idx = route[i], route[i+1]
-                                self.pheromones[city1_idx, city2_idx] += deposit_value
-                                self.pheromones[city2_idx, city1_idx] += deposit_value # Matriz simétrica
+            # 2. Depósito de feromonas por las hormigas de la iteración
+            for sol in iteration_solutions:
+                if sol['cost'] > 0:
+                    deposit_value = self.Q / sol['cost']
+                    for route in sol['routes']:
+                        for i in range(len(route) - 1):
+                            u, v = route[i], route[i+1]
+                            self.pheromones[u, v] += deposit_value
+                            self.pheromones[v, u] += deposit_value
 
+            # 3. Depósito Elitista (refuerza la mejor solución global)
+            if best_overall_routes:
+                elitist_deposit = self.elitism_weight * (self.Q / best_overall_cost)
+                for route in best_overall_routes:
+                    for i in range(len(route) - 1):
+                        u, v = route[i], route[i+1]
+                        self.pheromones[u, v] += elitist_deposit
+                        self.pheromones[v, u] += elitist_deposit
+            
             if progress_callback:
                 progress_callback(iteration + 1, n_iterations, best_overall_cost)
             
-        return best_overall_solution_routes, best_overall_cost
+        return best_overall_routes, best_overall_cost
 
     def evaluate_solution(self, solution):
-        """Calcula métricas detalladas para una solución dada."""
-        solution_routes = solution['routes']
-        solution_cost = solution['cost']
-
+        solution_routes = solution.get('routes', [])
         if not solution_routes: 
-            return {}
+            return {'total_distance_km': 0}
+
+        total_dist = sum(self.distances[route[i], route[i+1]] for route in solution_routes for i in range(len(route) - 1))
         
         metrics = {}
         metrics['num_vehicles_used'] = len(solution_routes)
-        metrics['total_distance_km'] = solution_cost
+        metrics['total_distance_km'] = total_dist
         metrics['route_details'] = []
         all_visited_customers = set()
         total_demand_serviced = 0
 
         for route in solution_routes:
-            dist = sum(self.distances[route[i]][route[i+1]] for i in range(len(route)-1))
+            dist = sum(self.distances[route[i], route[i+1]] for i in range(len(route)-1))
             route_customers = route[1:-1]
             load = sum(self.demands[city_idx] for city_idx in route_customers)
-            util_percent_nominal = (load / self.vehicle_capacity) * 100 if self.vehicle_capacity > 0 else 0
+            util_percent = (load / self.vehicle_capacity) * 100 if self.vehicle_capacity > 0 else 0
             
             metrics['route_details'].append({
                 'sequence': route_customers, 'distance': dist, 'load': load,
-                'stops': len(route_customers), 'utilization': util_percent_nominal
+                'stops': len(route_customers), 'utilization': util_percent
             })
             
             for c in route_customers: 
