@@ -190,7 +190,6 @@ with tab_config:
                     st.error("No se encontró una solución válida. Prueba ajustar los parámetros.")
                     st.session_state.solution = None
                 else:
-                    # CORRECCIÓN: Se elimina la línea que causaba el error y se usa una lógica más limpia.
                     evaluation = solver.evaluate_solution({'routes': best_routes})
                     st.session_state.solution = {'routes': best_routes, 'cost': evaluation['total_distance_km']}
                     st.session_state.evaluation = evaluation
@@ -224,10 +223,26 @@ with tab_results:
         st.subheader("📋 Detalles por Ruta")
         for i, route_detail in enumerate(eval_data['route_details']):
             with st.expander(f"**Ruta {i+1}** | Distancia: {route_detail['distance']:.2f} km | Carga: {route_detail['load']:.0f} ({route_detail['utilization']:.1f}%)"):
+                
+                # --- MEJORA: Mostrar Depósito de Salida y Llegada en la tabla ---
                 route_customer_indices = route_detail['sequence']
+                
+                # Crear DataFrame con los clientes de la ruta
                 route_df = st.session_state.customer_data.iloc[[idx - 1 for idx in route_customer_indices]].copy()
-                route_df.insert(0, "Orden", range(1, len(route_df) + 1))
-                st.dataframe(route_df[['Orden', 'name', 'demand', 'lat', 'lon']])
+                
+                # Crear DataFrames para el depósito
+                depot_lon, depot_lat = st.session_state.solver.depot_coord
+                depot_start_df = pd.DataFrame([{'name': 'Depósito (Salida)', 'demand': '-', 'lat': depot_lat, 'lon': depot_lon}])
+                depot_end_df = pd.DataFrame([{'name': 'Depósito (Llegada)', 'demand': '-', 'lat': depot_lat, 'lon': depot_lon}])
+                
+                # Concatenar para formar la tabla completa
+                full_route_display_df = pd.concat([depot_start_df, route_df, depot_end_df], ignore_index=True)
+                
+                # Añadir columna de orden
+                full_route_display_df.insert(0, "Orden", range(1, len(full_route_display_df) + 1))
+                
+                st.dataframe(full_route_display_df[['Orden', 'name', 'demand', 'lat', 'lon']])
+
     else:
         st.info("Completa y ejecuta la configuración para ver los resultados.")
         if st.session_state.customer_data is not None:
