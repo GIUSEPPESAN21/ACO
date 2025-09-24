@@ -54,35 +54,14 @@ def load_data(uploaded_file):
 
 def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
     """
-    Crea y devuelve un gráfico de Plotly con las rutas y puntos,
-    similar a la versión original.
+    Crea y devuelve un gráfico de Plotly con las rutas y puntos sobre un mapa.
     """
     if df_customers is None:
         return go.Figure()
 
     fig = go.Figure()
 
-    # 1. Añadir clientes
-    fig.add_trace(go.Scatter(
-        x=df_customers['lon'],
-        y=df_customers['lat'],
-        mode='markers',
-        marker=dict(color='blue', size=8),
-        name='Clientes',
-        text=df_customers.apply(lambda row: f"{row['name']}<br>Demanda: {row['demand']}", axis=1),
-        hoverinfo='text'
-    ))
-
-    # 2. Añadir depósito
-    fig.add_trace(go.Scatter(
-        x=[depot_coord[0]],
-        y=[depot_coord[1]],
-        mode='markers',
-        marker=dict(color='red', size=15, symbol='star'),
-        name='Depósito'
-    ))
-
-    # 3. Añadir rutas si existen
+    # 1. Añadir rutas si existen (se dibujan primero para que los puntos queden encima)
     if solution_routes and solver:
         all_coords = solver.cities_coords
         route_colors = [
@@ -92,31 +71,56 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         
         for i, route in enumerate(solution_routes):
             route_coords = [all_coords[city_idx] for city_idx in route]
-            route_x = [coord[0] for coord in route_coords]
-            route_y = [coord[1] for coord in route_coords]
+            route_lon = [coord[0] for coord in route_coords]
+            route_lat = [coord[1] for coord in route_coords]
             
-            # Obtener detalles de la ruta para la leyenda
             route_detail = st.session_state.evaluation['route_details'][i]
             
-            fig.add_trace(go.Scatter(
-                x=route_x,
-                y=route_y,
-                mode='lines+markers',
-                line=dict(color=route_colors[i % len(route_colors)], width=2),
-                marker=dict(size=5),
-                name=f"Ruta {i+1} ({route_detail['distance']:.1f} km, Carga: {route_detail['load']:.0f})"
+            fig.add_trace(go.Scattermapbox(
+                lon=route_lon,
+                lat=route_lat,
+                mode='lines',
+                line=dict(color=route_colors[i % len(route_colors)], width=3),
+                name=f"Ruta {i+1} ({route_detail['distance']:.1f} km, Carga: {route_detail['load']:.0f})",
+                hoverinfo='name'
             ))
 
+    # 2. Añadir clientes con números
+    fig.add_trace(go.Scattermapbox(
+        lon=df_customers['lon'],
+        lat=df_customers['lat'],
+        mode='markers+text',
+        marker=dict(color='blue', size=14),
+        # Se muestra el índice + 1 como número del cliente
+        text=[f"<b>{i+1}</b>" for i in df_customers.index],
+        textfont=dict(color='white', size=8),
+        textposition='middle center',
+        hovertext=df_customers.apply(lambda row: f"{row['name']}<br>Demanda: {row['demand']}", axis=1),
+        hoverinfo='text',
+        name='Clientes'
+    ))
+
+    # 3. Añadir depósito
+    fig.add_trace(go.Scattermapbox(
+        lon=[depot_coord[0]],
+        lat=[depot_coord[1]],
+        mode='markers',
+        marker=dict(color='red', size=20, symbol='star'),
+        name='Depósito'
+    ))
+
+    # 4. Actualizar layout para usar Mapbox
     fig.update_layout(
         title='<b>Mejor Solución de Ruteo Encontrada</b>',
-        xaxis_title='Longitud',
-        yaxis_title='Latitud',
         showlegend=True,
-        legend=dict(orientation="v", yanchor="top", y=1.02, xanchor="right", x=1.2),
-        margin=dict(l=60, r=200, b=50, t=50),
+        legend=dict(orientation="v", yanchor="top", y=1, xanchor="right", x=1, bgcolor="rgba(255,255,255,0.7)"),
+        margin=dict(l=10, r=10, b=10, t=50),
         hovermode='closest',
-        paper_bgcolor='#f9fafb',
-        plot_bgcolor='#ffffff'
+        mapbox=dict(
+            style="open-street-map",
+            center=dict(lon=depot_coord[0], lat=depot_coord[1]),
+            zoom=10
+        )
     )
     return fig
 
@@ -224,7 +228,6 @@ with tab_results:
         for i, route_detail in enumerate(eval_data['route_details']):
             with st.expander(f"**Ruta {i+1}** | Distancia: {route_detail['distance']:.2f} km | Carga: {route_detail['load']:.0f} ({route_detail['utilization']:.1f}%)"):
                 
-                # --- MEJORA: Mostrar Depósito de Salida y Llegada en la tabla ---
                 route_customer_indices = route_detail['sequence']
                 
                 # Crear DataFrame con los clientes de la ruta
@@ -247,7 +250,8 @@ with tab_results:
         st.info("Completa y ejecuta la configuración para ver los resultados.")
         if st.session_state.customer_data is not None:
              st.subheader("🗺️ Vista Previa de Ubicaciones")
-             depot_coord = (-74.140, 4.685) # Coordenadas por defecto para la vista previa
+             # Utiliza las coordenadas del formulario para la vista previa
+             depot_coord = (depot_lon, depot_lat)
              plotly_chart = get_plotly_chart(st.session_state.customer_data, depot_coord, None, None)
              st.plotly_chart(plotly_chart, use_container_width=True)
 
