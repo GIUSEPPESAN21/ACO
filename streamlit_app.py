@@ -78,7 +78,7 @@ def get_folium_results_map(solution_routes, solver, customer_data):
     return m
 
 # --- Interfaz Principal ---
-st.title("🚚 Optimizador de Rutas Vehiculares (CVRP)")
+st.title("🚚 Optimizador de Rutas Vehiculares (CVRP) (ACO)")
 st.write("Una herramienta inteligente para encontrar las rutas más eficientes y económicas para tu flota.")
 
 tab_config, tab_results, tab_about = st.tabs(["⚙️ 1. Configuración", "📊 2. Resultados", "👨‍💻 Acerca de"])
