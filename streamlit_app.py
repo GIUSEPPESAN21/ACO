@@ -232,7 +232,7 @@ with tab_results:
         st.info("Completa y ejecuta la configuración para ver los resultados.")
         if st.session_state.customer_data is not None:
              st.subheader("🗺️ Vista Previa de Ubicaciones")
-             depot_coord = (st.session_state.get('depot_lon', -74.140), st.session_state.get('depot_lat', 4.685))
+             depot_coord = (-74.140, 4.685) # Coordenadas por defecto para la vista previa
              plotly_chart = get_plotly_chart(st.session_state.customer_data, depot_coord, None, None)
              st.plotly_chart(plotly_chart, use_container_width=True)
 
