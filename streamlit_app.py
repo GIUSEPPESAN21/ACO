@@ -55,7 +55,7 @@ def load_data(uploaded_file):
 def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
     """
     Crea y devuelve un gráfico de Plotly con las rutas y puntos sobre un mapa,
-    con encuadre automático para mejor visualización.
+    con encuadre y zoom automático para mejor visualización.
     """
     if df_customers is None:
         return go.Figure()
@@ -100,21 +100,34 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         name='Clientes'
     ))
 
-    # 3. Añadir depósito
+    # 3. Añadir depósito con un icono único
     fig.add_trace(go.Scattermapbox(
         lon=[depot_coord[0]],
         lat=[depot_coord[1]],
         mode='markers',
-        marker=dict(color='red', size=20, symbol='star'),
+        marker=dict(color='#D62728', size=25, symbol='commercial'), # Icono de edificio comercial
         name='Depósito'
     ))
 
-    # --- MEJORA: Calcular el centro del mapa para encuadrar todos los puntos ---
+    # --- MEJORA: Calcular el centro y zoom del mapa para encuadrar todos los puntos ---
     all_lons = df_customers['lon'].tolist() + [depot_coord[0]]
     all_lats = df_customers['lat'].tolist() + [depot_coord[1]]
     center_lon = np.mean(all_lons)
     center_lat = np.mean(all_lats)
     
+    # Calcular el rango para ajustar el zoom
+    lon_range = np.abs(np.max(all_lons) - np.min(all_lons))
+    lat_range = np.abs(np.max(all_lats) - np.min(all_lats))
+    max_range = max(lon_range, lat_range)
+    
+    # Heurística para calcular el nivel de zoom
+    if max_range < 0.001: zoom = 15
+    elif max_range < 0.01: zoom = 13
+    elif max_range < 0.1: zoom = 11
+    elif max_range < 1: zoom = 9
+    elif max_range < 5: zoom = 7
+    else: zoom = 5
+
     # 4. Actualizar layout para usar Mapbox
     fig.update_layout(
         title='<b>Mejor Solución de Ruteo Encontrada</b>',
@@ -125,7 +138,7 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         mapbox=dict(
             style="open-street-map",
             center=dict(lon=center_lon, lat=center_lat), # Usa el centro calculado
-            zoom=9 # Un nivel de zoom inicial razonable
+            zoom=zoom 
         )
     )
     return fig
