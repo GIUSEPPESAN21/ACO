@@ -1,5 +1,5 @@
 # streamlit_app.py
-# Interfaz de usuario con cálculos de costo y duración.
+# Versión final corregida para manejar KeyError de forma robusta.
 
 import streamlit as st
 import pandas as pd
@@ -52,7 +52,6 @@ def load_data(uploaded_file):
         return None
 
 def format_duration(hours):
-    """Convierte horas decimales a un formato de 'X h Y min'."""
     h = int(hours)
     m = int((hours - h) * 60)
     return f"{h} h {m} min"
@@ -66,7 +65,10 @@ def get_folium_results_map(solution_routes, solver, customer_data):
     for i, route in enumerate(solution_routes):
         route_coords = [(solver.cities_coords[c][1], solver.cities_coords[c][0]) for c in route]
         detail = st.session_state.evaluation['route_details'][i]
-        tooltip = f"Ruta {i+1} | Costo: ${detail['cost']:,.0f} | Duración: {format_duration(detail['duration_hours'])}"
+        # CORREGIDO: Usar .get() para evitar errores si las claves no existen
+        cost = detail.get('cost', 0)
+        duration_h = detail.get('duration_hours', 0)
+        tooltip = f"Ruta {i+1} | Costo: ${cost:,.0f} | Duración: {format_duration(duration_h)}"
         folium.PolyLine(locations=route_coords, color=route_colors[i % len(route_colors)], weight=4, opacity=0.8, tooltip=tooltip).add_to(m)
 
     for _, row in customer_data.iterrows():
@@ -98,7 +100,7 @@ with tab_config:
         st.info("Haz clic en el mapa para establecer el punto de partida.")
         
         map_center = [st.session_state.depot_lat, st.session_state.depot_lon]
-        if st.session_state.customer_data is not None:
+        if st.session_state.customer_data is not None and not st.session_state.customer_data.empty:
             map_center = [st.session_state.customer_data['lat'].mean(), st.session_state.customer_data['lon'].mean()]
 
         m_config = folium.Map(location=map_center, zoom_start=13, tiles="cartodbpositron")
@@ -118,7 +120,6 @@ with tab_config:
         n_vehicles = st.number_input("Número de Vehículos", 1, 100, 10)
         vehicle_capacity = st.number_input("Capacidad por Vehículo", 1, 1000, 150)
         
-        # NUEVA SECCIÓN
         st.subheader("4. Parámetros de Simulación")
         cost_per_km = st.number_input("Costo por KM ($)", 0.0, 100000.0, 1500.0, 50.0, format="%.2f")
         speed_kmh = st.number_input("Velocidad Promedio (km/h)", 1.0, 120.0, 40.0, 1.0)
@@ -127,12 +128,12 @@ with tab_config:
         with st.expander("5. Ajustes Avanzados del Algoritmo (ACO)"):
             n_ants = st.slider("Hormigas", 5, 100, 30)
             n_iterations = st.slider("Iteraciones", 10, 1000, 200)
-            alpha = st.slider("Alpha (α)", 0.1, 5.0, 1.0, 0.1, help="Influencia de feromona.")
-            beta = st.slider("Beta (β)", 0.1, 5.0, 2.0, 0.1, help="Influencia de distancia.")
-            rho = st.slider("Rho (ρ)", 0.01, 1.0, 0.5, 0.01, help="Evaporación de feromona.")
-            q_val = st.number_input("Q", value=100, help="Depósito de feromona.")
-            use_2_opt = st.toggle("Búsqueda Local (2-opt)", True, help="Evita cruces en las rutas.")
-            elitism_weight = st.slider("Peso Elitista", 1.0, 10.0, 3.0, 0.5, help="Refuerza la mejor ruta.")
+            alpha = st.slider("Alpha (α)", 0.1, 5.0, 1.0, 0.1)
+            beta = st.slider("Beta (β)", 0.1, 5.0, 2.0, 0.1)
+            rho = st.slider("Rho (ρ)", 0.01, 1.0, 0.5, 0.01)
+            q_val = st.number_input("Q", value=100)
+            use_2_opt = st.toggle("Búsqueda Local (2-opt)", True)
+            elitism_weight = st.slider("Peso Elitista", 1.0, 10.0, 3.0, 0.5)
 
     st.divider()
     if st.button("🚀 Iniciar Optimización", type="primary", use_container_width=True):
@@ -143,7 +144,7 @@ with tab_config:
                 progress_bar = st.progress(0, text="Iniciando...")
                 def progress_callback(i, total, cost):
                     progress = i / total
-                    cost_str = f"${cost:,.2f}" if cost != float('inf') else "Calculando..."
+                    cost_str = f"{cost:,.1f}" if cost != float('inf') else "Calculando..."
                     progress_bar.progress(progress, text=f"Iteración {i}/{total} - Mejor Distancia: {cost_str} km")
 
                 solver = ACO_CVRP_Solver(
@@ -159,6 +160,7 @@ with tab_config:
                 if not best_routes:
                     st.error("No se encontró solución. Prueba ajustar los parámetros.")
                     st.session_state.solution = None
+                    st.session_state.evaluation = None # Limpiar evaluación en caso de error
                 else:
                     evaluation = solver.evaluate_solution({'routes': best_routes}, cost_per_km, speed_kmh, service_time_min)
                     st.session_state.solution = {'routes': best_routes}
@@ -172,31 +174,36 @@ with tab_results:
     if st.session_state.evaluation:
         eval_data = st.session_state.evaluation
         
-        # MÉTRICAS PRINCIPALES (MODIFICADO)
         st.subheader("📈 Resumen Ejecutivo")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Costo Total de Rutas", f"${eval_data['total_cost']:,.0f}")
-        m2.metric("Distancia Total", f"{eval_data['total_distance_km']:,.1f} km")
-        m3.metric("Duración Total (Horas-Hombre)", f"{format_duration(eval_data['total_duration_hours'])}")
+        # CORREGIDO: Usar .get() con un valor por defecto (0) para evitar KeyError
+        m1.metric("Costo Total de Rutas", f"${eval_data.get('total_cost', 0):,.0f}")
+        m2.metric("Distancia Total", f"{eval_data.get('total_distance_km', 0):,.1f} km")
+        m3.metric("Duración Total (Horas-Hombre)", f"{format_duration(eval_data.get('total_duration_hours', 0))}")
         
         m4, m5, m6 = st.columns(3)
-        m4.metric("Vehículos Usados", f"{eval_data['num_vehicles_used']} / {st.session_state.solver.n_vehicles}")
-        m5.metric("Clientes Visitados", f"{eval_data['customers_visited_count']} / {st.session_state.solver.n_customers}")
-        m6.metric("Uso Promedio de Capacidad", f"{eval_data['avg_vehicle_utilization_percent']:.1f}%")
+        m4.metric("Vehículos Usados", f"{eval_data.get('num_vehicles_used', 0)} / {getattr(st.session_state.solver, 'n_vehicles', 'N/A')}")
+        m5.metric("Clientes Visitados", f"{eval_data.get('customers_visited_count', 0)} / {getattr(st.session_state.solver, 'n_customers', 'N/A')}")
+        m6.metric("Uso Promedio de Capacidad", f"{eval_data.get('avg_vehicle_utilization_percent', 0):.1f}%")
 
         st.subheader("🗺️ Visualización de Rutas Optimizadas")
         results_map = get_folium_results_map(st.session_state.solution['routes'], st.session_state.solver, st.session_state.customer_data)
         st_folium(results_map, width=1000, height=500, returned_objects=[])
         
         st.subheader("📋 Detalles por Ruta")
-        for i, detail in enumerate(eval_data['route_details']):
-            # Título del expander MODIFICADO
+        for i, detail in enumerate(eval_data.get('route_details', [])):
+            # CORREGIDO: Usar .get() también aquí
+            cost = detail.get('cost', 0)
+            duration_h = detail.get('duration_hours', 0)
+            load = detail.get('load', 0)
+            utilization = detail.get('utilization', 0)
+            
             expander_title = (f"**Ruta {i+1}** | "
-                              f"Costo: `${detail['cost']:,.0f}` | "
-                              f"Duración: `{format_duration(detail['duration_hours'])}` | "
-                              f"Carga: `{detail['load']:.0f} ({detail['utilization']:.1f}%)`")
+                              f"Costo: `${cost:,.0f}` | "
+                              f"Duración: `{format_duration(duration_h)}` | "
+                              f"Carga: `{load:.0f} ({utilization:.1f}%)`")
             with st.expander(expander_title):
-                route_indices = detail['sequence']
+                route_indices = detail.get('sequence', [])
                 if not route_indices: continue
                 route_df = st.session_state.customer_data.iloc[[idx - 1 for idx in route_indices]]
                 st.dataframe(route_df[['name', 'demand', 'lat', 'lon']])
@@ -205,4 +212,11 @@ with tab_results:
 
 with tab_about:
     st.header("Acerca del Proyecto")
-    st.markdown("...") # Mantener contenido anterior
+    st.markdown("""
+    Esta aplicación fue desarrollada como una herramienta avanzada para la optimización logística, aplicando metaheurísticas para resolver problemas complejos de ruteo de vehículos.
+    ### Tecnología Utilizada
+    - **Framework:** Streamlit, Folium
+    - **Algoritmo:** Optimización por Colonia de Hormigas (ACO) con Elitismo y Búsqueda Local (2-opt).
+    - **Visualización:** Folium
+    - **Lenguaje:** Python
+    """)
