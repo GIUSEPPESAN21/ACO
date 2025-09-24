@@ -31,12 +31,13 @@ if 'customer_data' not in st.session_state:
 def load_data(uploaded_file):
     """
     Carga y procesa el archivo CSV de clientes.
-    Versión robusta que normaliza las columnas para evitar KeyErrors.
+    Versión robusta que normaliza columnas y maneja la codificación 'latin1'.
     """
     if uploaded_file is None:
         return None
     try:
-        df = pd.read_csv(uploaded_file, delimiter=';')
+        # CORRECCIÓN: Se añade encoding='latin1' para leer tildes y caracteres especiales.
+        df = pd.read_csv(uploaded_file, delimiter=';', encoding='latin1')
 
         # Mapeo de columnas requeridas (origen -> destino)
         column_map = {
@@ -280,4 +281,3 @@ with tab_about:
     
     *El código de esta aplicación ha sido analizado y potenciado con la asistencia de IA para mejorar su estructura, eficiencia y experiencia de usuario.*
     """)
-
