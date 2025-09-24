@@ -1,13 +1,13 @@
 # solver.py
 # Contiene la clase ACO_CVRP_Solver con la lógica del algoritmo.
-# Versión potenciada con Elitismo, 2-opt y corrección de capacidad.
+# Versión potenciada con Elitismo, 2-opt y tolerancia de capacidad.
 
 import numpy as np
 import random
 from math import radians, sin, cos, sqrt, asin
 
 class ACO_CVRP_Solver:
-    def __init__(self, depot_coord, customer_coords, customer_demands, n_vehicles, vehicle_capacity, params, use_2_opt=True, elitism_weight=1.0):
+    def __init__(self, depot_coord, customer_coords, customer_demands, n_vehicles, vehicle_capacity, params, use_2_opt=True, elitism_weight=1.0, capacity_tolerance=0.05): # MODIFICADO
         self.depot_coord = depot_coord
         self.customer_coords = customer_coords
         self.customer_demands = [float(d) for d in customer_demands]
@@ -19,6 +19,8 @@ class ACO_CVRP_Solver:
         self.n_customers = len(self.customer_coords)
         self.n_vehicles = n_vehicles
         self.vehicle_capacity = float(vehicle_capacity)
+        # NUEVO: Capacidad efectiva con tolerancia para más flexibilidad
+        self.effective_vehicle_capacity = self.vehicle_capacity * (1 + capacity_tolerance)
 
         self.depot_index = 0
         self.distances = self._calculate_distance_matrix_haversine()
@@ -56,7 +58,8 @@ class ACO_CVRP_Solver:
     def _select_next_city(self, current_city_idx, unvisited_customers, current_vehicle_load):
         feasible_customers = [
             cust_idx for cust_idx in unvisited_customers
-            if current_vehicle_load + self.demands[cust_idx] <= self.vehicle_capacity
+            # MODIFICADO: Usa la capacidad efectiva
+            if current_vehicle_load + self.demands[cust_idx] <= self.effective_vehicle_capacity
         ]
         if not feasible_customers:
             return None
@@ -164,18 +167,11 @@ class ACO_CVRP_Solver:
         return best_overall_routes, best_overall_cost
 
     def evaluate_solution(self, solution):
-        """
-        Calcula un conjunto completo de métricas para una solución dada.
-        CORREGIDO para siempre devolver 'total_distance_km' y evitar KeyError.
-        """
         solution_routes = solution.get('routes', [])
         if not solution_routes: 
             return {
-                'total_distance_km': 0,
-                'num_vehicles_used': 0,
-                'route_details': [],
-                'customers_visited_count': 0,
-                'avg_vehicle_utilization_percent': 0
+                'total_distance_km': 0, 'num_vehicles_used': 0, 'route_details': [],
+                'customers_visited_count': 0, 'avg_vehicle_utilization_percent': 0
             }
 
         total_dist = sum(self.distances[route[i], route[i+1]] for route in solution_routes for i in range(len(route) - 1))
