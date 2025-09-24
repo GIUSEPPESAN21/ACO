@@ -55,7 +55,7 @@ def load_data(uploaded_file):
 def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
     """
     Crea y devuelve un gráfico de Plotly con las rutas y puntos sobre un mapa,
-    con encuadre y zoom automático para mejor visualización.
+    con encuadre, zoom automático y etiqueta de coordenadas para el depósito.
     """
     if df_customers is None:
         return go.Figure()
@@ -100,12 +100,14 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         name='Clientes'
     ))
 
-    # 3. Añadir depósito con un icono único
+    # 3. Añadir depósito con un icono único y etiqueta de coordenadas
     fig.add_trace(go.Scattermapbox(
         lon=[depot_coord[0]],
         lat=[depot_coord[1]],
         mode='markers',
         marker=dict(color='#D62728', size=25, symbol='commercial'), # Icono de edificio comercial
+        hovertext=f"<b>Depósito</b><br>Lon: {depot_coord[0]:.5f}<br>Lat: {depot_coord[1]:.5f}",
+        hoverinfo='text',
         name='Depósito'
     ))
 
@@ -155,8 +157,8 @@ with tab_config:
     with col1:
         st.subheader("1. Datos del Problema")
         uploaded_file = st.file_uploader("Sube tu archivo de clientes (delimitado por ';')", type="csv")
-        depot_lat = st.number_input("Latitud Depósito", value=3,90089, format="%.5f")
-        depot_lon = st.number_input("Longitud Depósito", value=-76,29783, format="%.5f")
+        depot_lat = st.number_input("Latitud Depósito", value=4.685, format="%.5f")
+        depot_lon = st.number_input("Longitud Depósito", value=-74.140, format="%.5f")
         n_vehicles = st.number_input("Número de Vehículos", min_value=1, value=10)
         vehicle_capacity = st.number_input("Capacidad por Vehículo", min_value=1, value=150)
     with col2:
