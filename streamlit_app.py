@@ -10,7 +10,7 @@ import folium
 from io import StringIO
 
 # --- Configuración de la Página ---
-st.set_page_config(page_title="Optimizador de Rutas (CVRP)", page_icon="🚚", layout="wide")
+st.set_page_config(page_title="Optimizador de Rutas (CVRP-ACO)", page_icon="🚚", layout="wide")
 
 # --- Estado de la Sesión ---
 if 'solution' not in st.session_state: st.session_state.solution = None
