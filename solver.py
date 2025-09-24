@@ -1,5 +1,6 @@
 # solver.py
 # Contiene la clase ACO_CVRP_Solver con la lógica del algoritmo.
+# (Sin cambios respecto a la versión anterior)
 
 import numpy as np
 import random
@@ -205,3 +206,4 @@ class ACO_CVRP_Solver:
         num_used = metrics['num_vehicles_used']
         metrics['avg_vehicle_utilization_percent'] = (total_demand_serviced / (num_used * self.vehicle_capacity)) * 100 if num_used > 0 and self.vehicle_capacity > 0 else 0
         return metrics
+
