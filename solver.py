@@ -1,197 +1,254 @@
-# solver.py
-# Contiene la clase ACO_CVRP_Solver con la lógica del algoritmo.
-# Versión potenciada con Elitismo, 2-opt y corrección de capacidad.
+# streamlit_app.py
+# Interfaz de usuario principal para el Optimizador CVRP.
 
+import streamlit as st
+import pandas as pd
 import numpy as np
-import random
-from math import radians, sin, cos, sqrt, asin
+import plotly.graph_objects as go
+from solver import ACO_CVRP_Solver
 
-class ACO_CVRP_Solver:
-    def __init__(self, depot_coord, customer_coords, customer_demands, n_vehicles, vehicle_capacity, params, use_2_opt=True, elitism_weight=1.0):
-        self.depot_coord = depot_coord
-        self.customer_coords = customer_coords
-        self.customer_demands = [float(d) for d in customer_demands]
+# --- Configuración de la Página ---
+st.set_page_config(
+    page_title="Optimizador de Rutas (CVRP)",
+    page_icon="🚚",
+    layout="wide"
+)
+
+# --- Estado de la Sesión ---
+if 'solution' not in st.session_state:
+    st.session_state.solution = None
+if 'evaluation' not in st.session_state:
+    st.session_state.evaluation = None
+if 'solver' not in st.session_state:
+    st.session_state.solver = None
+if 'customer_data' not in st.session_state:
+    st.session_state.customer_data = None
+
+
+# --- Funciones de la Aplicación ---
+@st.cache_data
+def load_data(uploaded_file):
+    """
+    Carga y procesa el archivo CSV de clientes.
+    """
+    if uploaded_file is None:
+        return None
+    try:
+        df = pd.read_csv(uploaded_file, delimiter=';', encoding='latin1')
+        column_map = {'nombre': 'name', 'lat': 'lat', 'lon': 'lon', 'pasajeros': 'demand'}
+        df.columns = [col.strip().lower() for col in df.columns]
+
+        for required_col in column_map.keys():
+            if required_col not in df.columns:
+                st.error(f"Error: La columna requerida '{required_col}' no se encontró en el archivo CSV.")
+                return None
         
-        self.cities_coords = [self.depot_coord] + self.customer_coords
-        self.demands = [0.0] + self.customer_demands
-        
-        self.n_cities = len(self.cities_coords)
-        self.n_customers = len(self.customer_coords)
-        self.n_vehicles = n_vehicles
-        self.vehicle_capacity = float(vehicle_capacity) # CORRECCIÓN: Se usa la capacidad estricta.
+        df = df.rename(columns=column_map)
+        df = df[list(column_map.values())]
+        df[['lat', 'lon', 'demand']] = df[['lat', 'lon', 'demand']].astype(float)
+        return df
+    except Exception as e:
+        st.error(f"Error al procesar el archivo: {e}")
+        return None
 
-        self.depot_index = 0
-        self.distances = self._calculate_distance_matrix_haversine()
-        
-        self.alpha = float(params.get('alpha', 1.0))
-        self.beta = float(params.get('beta', 2.0))
-        self.rho = float(params.get('rho', 0.1))
-        self.Q = float(params.get('Q', 100))
-        
-        self.use_2_opt = use_2_opt
-        self.elitism_weight = float(elitism_weight)
 
-        self.pheromones = np.ones((self.n_cities, self.n_cities))
+def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
+    """
+    Crea y devuelve un gráfico de Plotly con las rutas y puntos,
+    similar a la versión original.
+    """
+    if df_customers is None:
+        return go.Figure()
 
-    def _haversine_distance(self, lat1, lon1, lat2, lon2):
-        R = 6371
-        lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(radians, [float(lat1), float(lon1), float(lat2), float(lon2)])
-        dlon = lon2_rad - lon1_rad
-        dlat = lat2_rad - lat1_rad
-        a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon / 2)**2
-        c = 2 * asin(sqrt(a))
-        return R * c
+    fig = go.Figure()
 
-    def _calculate_distance_matrix_haversine(self):
-        n = self.n_cities
-        distances = np.zeros((n, n))
-        for i in range(n):
-            for j in range(i + 1, n):
-                lon1, lat1 = self.cities_coords[i]
-                lon2, lat2 = self.cities_coords[j]
-                dist = self._haversine_distance(lat1, lon1, lat2, lon2)
-                distances[i, j] = distances[j, i] = dist
-        return distances
+    # 1. Añadir clientes
+    fig.add_trace(go.Scatter(
+        x=df_customers['lon'],
+        y=df_customers['lat'],
+        mode='markers',
+        marker=dict(color='blue', size=8),
+        name='Clientes',
+        text=df_customers.apply(lambda row: f"{row['name']}<br>Demanda: {row['demand']}", axis=1),
+        hoverinfo='text'
+    ))
 
-    def _select_next_city(self, current_city_idx, unvisited_customers, current_vehicle_load):
-        feasible_customers = [
-            cust_idx for cust_idx in unvisited_customers
-            # CORRECCIÓN: Se comprueba contra la capacidad estricta del vehículo.
-            if current_vehicle_load + self.demands[cust_idx] <= self.vehicle_capacity
+    # 2. Añadir depósito
+    fig.add_trace(go.Scatter(
+        x=[depot_coord[0]],
+        y=[depot_coord[1]],
+        mode='markers',
+        marker=dict(color='red', size=15, symbol='star'),
+        name='Depósito'
+    ))
+
+    # 3. Añadir rutas si existen
+    if solution_routes and solver:
+        all_coords = solver.cities_coords
+        route_colors = [
+            '#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', 
+            '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'
         ]
-        if not feasible_customers:
-            return None
-
-        probabilities = []
-        for customer_idx in feasible_customers:
-            distance = self.distances[current_city_idx, customer_idx]
-            visibility = (1.0 / distance) if distance > 0 else 1e9
-            pheromone = self.pheromones[current_city_idx, customer_idx]
-            probabilities.append((pheromone ** self.alpha) * (visibility ** self.beta))
         
-        sum_probabilities = sum(probabilities)
-        if sum_probabilities == 0:
-            return random.choice(feasible_customers)
+        for i, route in enumerate(solution_routes):
+            route_coords = [all_coords[city_idx] for city_idx in route]
+            route_x = [coord[0] for coord in route_coords]
+            route_y = [coord[1] for coord in route_coords]
+            
+            # Obtener detalles de la ruta para la leyenda
+            route_detail = st.session_state.evaluation['route_details'][i]
+            
+            fig.add_trace(go.Scatter(
+                x=route_x,
+                y=route_y,
+                mode='lines+markers',
+                line=dict(color=route_colors[i % len(route_colors)], width=2),
+                marker=dict(size=5),
+                name=f"Ruta {i+1} ({route_detail['distance']:.1f} km, Carga: {route_detail['load']:.0f})"
+            ))
 
-        probabilities = [p / sum_probabilities for p in probabilities]
-        return random.choices(feasible_customers, weights=probabilities, k=1)[0]
+    fig.update_layout(
+        title='<b>Mejor Solución de Ruteo Encontrada</b>',
+        xaxis_title='Longitud',
+        yaxis_title='Latitud',
+        showlegend=True,
+        legend=dict(orientation="v", yanchor="top", y=1.02, xanchor="right", x=1.2),
+        margin=dict(l=60, r=200, b=50, t=50),
+        hovermode='closest',
+        paper_bgcolor='#f9fafb',
+        plot_bgcolor='#ffffff'
+    )
+    return fig
+
+# --- Interfaz Principal ---
+st.title("🚚 Optimizador de Rutas Vehiculares (CVRP)")
+st.write("Esta herramienta utiliza un **Algoritmo de Colonia de Hormigas (ACO)** potenciado para encontrar las rutas más eficientes.")
+
+tab_config, tab_results, tab_about = st.tabs(["⚙️ Configuración y Ejecución", "📊 Resultados", "👨‍💻 Acerca de"])
+
+with tab_config:
+    st.header("Parámetros de Entrada")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("1. Datos del Problema")
+        uploaded_file = st.file_uploader("Sube tu archivo de clientes (delimitado por ';')", type="csv")
+        depot_lat = st.number_input("Latitud Depósito", value=4.685, format="%.5f")
+        depot_lon = st.number_input("Longitud Depósito", value=-74.140, format="%.5f")
+        n_vehicles = st.number_input("Número de Vehículos", min_value=1, value=10)
+        vehicle_capacity = st.number_input("Capacidad por Vehículo", min_value=1, value=150)
+    with col2:
+        st.subheader("2. Parámetros del Algoritmo (ACO)")
+        n_ants = st.slider("Número de Hormigas", 5, 100, 30)
+        n_iterations = st.slider("Número de Iteraciones", 10, 1000, 200)
+        alpha = st.slider("Alpha (α)", 0.1, 5.0, 1.0, 0.1, help="Influencia de la feromona.")
+        beta = st.slider("Beta (β)", 0.1, 5.0, 2.0, 0.1, help="Influencia de la visibilidad (distancia).")
+        rho = st.slider("Rho (ρ)", 0.01, 1.0, 0.5, 0.01, help="Tasa de evaporación de la feromona.")
+        q_val = st.number_input("Q", value=100, help="Constante de depósito de feromona.")
+        
+        st.subheader("3. Mejoras de Potencia")
+        use_2_opt = st.toggle("Búsqueda Local (2-opt)", value=True, help="Mejora las rutas para evitar cruces.")
+        elitism_weight = st.slider("Peso de Elitismo", 1.0, 10.0, 3.0, 0.5, help="Refuerza la mejor ruta encontrada.")
+
+    st.divider()
+    start_button = st.button("🚀 Iniciar Optimización", type="primary", use_container_width=True)
     
-    def _two_opt(self, route):
-        if len(route) <= 4:
-            return route
+    if uploaded_file:
+        st.session_state.customer_data = load_data(uploaded_file)
+        if st.session_state.customer_data is not None:
+             st.success(f"Archivo cargado correctamente: {len(st.session_state.customer_data)} clientes encontrados.")
+
+    if start_button:
+        if st.session_state.customer_data is None:
+            st.error("Por favor, carga un archivo de datos de clientes válido.")
+        else:
+            with st.spinner("Optimizando rutas... Por favor espera."):
+                progress_bar = st.progress(0)
+                progress_text = st.empty()
+                
+                def progress_callback(iteration, total_iterations, best_cost):
+                    progress = iteration / total_iterations
+                    progress_bar.progress(progress)
+                    cost_str = f"{best_cost:,.2f}" if best_cost != float('inf') else "N/A"
+                    progress_text.text(f"Iteración {iteration}/{total_iterations} - Mejor costo: {cost_str} km")
+
+                params_aco = {'alpha': alpha, 'beta': beta, 'rho': rho, 'Q': q_val}
+                depot_coord = (depot_lon, depot_lat)
+                
+                solver = ACO_CVRP_Solver(
+                    depot_coord=depot_coord,
+                    customer_coords=st.session_state.customer_data[['lon', 'lat']].values.tolist(),
+                    customer_demands=st.session_state.customer_data['demand'].values.tolist(),
+                    n_vehicles=n_vehicles,
+                    vehicle_capacity=vehicle_capacity,
+                    params=params_aco,
+                    use_2_opt=use_2_opt,
+                    elitism_weight=elitism_weight
+                )
+                best_routes, best_cost = solver.solve(n_ants, n_iterations, progress_callback)
+                
+                if not best_routes:
+                    st.error("No se encontró una solución válida. Prueba ajustar los parámetros.")
+                    st.session_state.solution = None
+                else:
+                    # CORRECCIÓN: Se elimina la línea que causaba el error y se usa una lógica más limpia.
+                    evaluation = solver.evaluate_solution({'routes': best_routes})
+                    st.session_state.solution = {'routes': best_routes, 'cost': evaluation['total_distance_km']}
+                    st.session_state.evaluation = evaluation
+                    st.session_state.solver = solver
+                    st.success("¡Optimización completada! Ve a la pestaña 'Resultados'.")
+                
+                progress_bar.empty()
+                progress_text.empty()
+
+with tab_results:
+    st.header("Visualización de Resultados")
+    
+    if st.session_state.solution:
+        eval_data = st.session_state.evaluation
+        st.subheader("📈 Métricas Clave de la Solución")
+        cols = st.columns(4)
+        cols[0].metric("Costo Total", f"{st.session_state.solution['cost']:,.2f} km")
+        cols[1].metric("Vehículos Usados", f"{eval_data['num_vehicles_used']} / {st.session_state.solver.n_vehicles}")
+        cols[2].metric("Clientes Visitados", f"{eval_data['customers_visited_count']} / {st.session_state.solver.n_customers}")
+        cols[3].metric("Uso Promedio Capacidad", f"{eval_data['avg_vehicle_utilization_percent']:.1f}%")
+
+        st.subheader("🗺️ Visualización de Rutas")
+        plotly_chart = get_plotly_chart(
+            st.session_state.customer_data, 
+            st.session_state.solver.depot_coord,
+            st.session_state.solution['routes'],
+            st.session_state.solver
+        )
+        st.plotly_chart(plotly_chart, use_container_width=True)
         
-        improved = True
-        while improved:
-            improved = False
-            for i in range(1, len(route) - 2):
-                for j in range(i + 1, len(route)):
-                    if j == i + 1: continue
-                    current_dist = self.distances[route[i-1], route[i]] + self.distances[route[j-1], route[j]]
-                    new_dist = self.distances[route[i-1], route[j-1]] + self.distances[route[i], route[j]]
-                    if new_dist < current_dist:
-                        route[i:j] = route[j-1:i-1:-1]
-                        improved = True
-        return route
+        st.subheader("📋 Detalles por Ruta")
+        for i, route_detail in enumerate(eval_data['route_details']):
+            with st.expander(f"**Ruta {i+1}** | Distancia: {route_detail['distance']:.2f} km | Carga: {route_detail['load']:.0f} ({route_detail['utilization']:.1f}%)"):
+                route_customer_indices = route_detail['sequence']
+                route_df = st.session_state.customer_data.iloc[[idx - 1 for idx in route_customer_indices]].copy()
+                route_df.insert(0, "Orden", range(1, len(route_df) + 1))
+                st.dataframe(route_df[['Orden', 'name', 'demand', 'lat', 'lon']])
+    else:
+        st.info("Completa y ejecuta la configuración para ver los resultados.")
+        if st.session_state.customer_data is not None:
+             st.subheader("🗺️ Vista Previa de Ubicaciones")
+             depot_coord = (-74.140, 4.685) # Coordenadas por defecto para la vista previa
+             plotly_chart = get_plotly_chart(st.session_state.customer_data, depot_coord, None, None)
+             st.plotly_chart(plotly_chart, use_container_width=True)
 
-    def _construct_solution_for_ant(self):
-        solution_routes = []
-        unvisited = list(range(1, self.n_cities))
-        random.shuffle(unvisited)
-        
-        for _ in range(self.n_vehicles):
-            if not unvisited: break
-            
-            current_route = [self.depot_index]
-            current_city = self.depot_index
-            current_load = 0.0
-
-            while unvisited:
-                next_city = self._select_next_city(current_city, unvisited, current_load)
-                if next_city is None: break
-
-                current_load += self.demands[next_city]
-                current_route.append(next_city)
-                unvisited.remove(next_city)
-                current_city = next_city
-            
-            current_route.append(self.depot_index)
-            
-            if self.use_2_opt:
-                current_route = self._two_opt(current_route)
-
-            if len(current_route) > 2:
-                solution_routes.append(current_route)
-        
-        cost = sum(self.distances[route[i], route[i+1]] for route in solution_routes for i in range(len(route)-1))
-        
-        return solution_routes, cost, unvisited
-
-    def solve(self, n_ants, n_iterations, progress_callback=None):
-        best_overall_routes = None
-        best_overall_cost = float('inf')
-
-        for iteration in range(n_iterations):
-            iteration_solutions = []
-            for _ in range(n_ants):
-                routes, cost, unvisited = self._construct_solution_for_ant()
-                if not unvisited:
-                    iteration_solutions.append({'routes': routes, 'cost': cost})
-                    if cost < best_overall_cost:
-                        best_overall_cost = cost
-                        best_overall_routes = routes
-
-            self.pheromones *= (1.0 - self.rho)
-
-            for sol in iteration_solutions:
-                if sol['cost'] > 0:
-                    deposit_value = self.Q / sol['cost']
-                    for route in sol['routes']:
-                        for i in range(len(route) - 1):
-                            u, v = route[i], route[i+1]
-                            self.pheromones[u, v] += deposit_value
-                            self.pheromones[v, u] += deposit_value
-
-            if best_overall_routes:
-                elitist_deposit = self.elitism_weight * (self.Q / best_overall_cost)
-                for route in best_overall_routes:
-                    for i in range(len(route) - 1):
-                        u, v = route[i], route[i+1]
-                        self.pheromones[u, v] += elitist_deposit
-                        self.pheromones[v, u] += elitist_deposit
-            
-            if progress_callback:
-                progress_callback(iteration + 1, n_iterations, best_overall_cost)
-            
-        return best_overall_routes, best_overall_cost
-
-    def evaluate_solution(self, solution):
-        solution_routes = solution.get('routes', [])
-        if not solution_routes: 
-            return {}
-
-        metrics = {}
-        metrics['num_vehicles_used'] = len(solution_routes)
-        metrics['route_details'] = []
-        all_visited_customers = set()
-        total_demand_serviced = 0
-
-        for route in solution_routes:
-            dist = sum(self.distances[route[i], route[i+1]] for i in range(len(route)-1))
-            route_customers = route[1:-1]
-            load = sum(self.demands[city_idx] for city_idx in route_customers)
-            util_percent = (load / self.vehicle_capacity) * 100 if self.vehicle_capacity > 0 else 0
-            
-            metrics['route_details'].append({
-                'sequence': route_customers, 'distance': dist, 'load': load,
-                'stops': len(route_customers), 'utilization': util_percent
-            })
-            for c in route_customers: 
-                all_visited_customers.add(c)
-            total_demand_serviced += load
-        
-        metrics['customers_visited_count'] = len(all_visited_customers)
-        metrics['all_customers_serviced'] = (len(all_visited_customers) == self.n_customers)
-        num_used = metrics['num_vehicles_used']
-        metrics['avg_vehicle_utilization_percent'] = (total_demand_serviced / (num_used * self.vehicle_capacity)) * 100 if num_used > 0 and self.vehicle_capacity > 0 else 0
-        return metrics
+with tab_about:
+    st.header("Acerca del Proyecto y del Autor")
+    st.image("https://i.imgur.com/8bf3k8u.png")
+    st.markdown("""
+    Esta aplicación fue desarrollada como una herramienta avanzada para la optimización logística, aplicando metaheurísticas para resolver problemas complejos de ruteo de vehículos.
+    ### Autor
+    - **Nombre:** (Aquí va tu nombre)
+    - **Contacto:** (Tu email o red de contacto)
+    - **LinkedIn:** [Tu Perfil](https://www.linkedin.com/in/tu-usuario/)
+    ### Tecnología Utilizada
+    - **Framework:** Streamlit
+    - **Algoritmo:** Optimización por Colonia de Hormigas (ACO) con Elitismo y Búsqueda Local (2-opt).
+    - **Visualización:** Plotly
+    - **Lenguaje:** Python
+    """)
 
