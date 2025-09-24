@@ -1,17 +1,12 @@
 # solver.py
 # Contiene la clase ACO_CVRP_Solver con la lógica del algoritmo.
-# Versión potenciada con Elitismo y Búsqueda Local 2-opt.
+# Versión potenciada con Elitismo, 2-opt y corrección de capacidad.
 
 import numpy as np
 import random
 from math import radians, sin, cos, sqrt, asin
 
 class ACO_CVRP_Solver:
-    """
-    Resuelve el Problema de Ruteo de Vehículos con Capacidad (CVRP)
-    utilizando un algoritmo de Optimización por Colonia de Hormigas (ACO)
-    potenciado con Elitismo y Búsqueda Local 2-opt.
-    """
     def __init__(self, depot_coord, customer_coords, customer_demands, n_vehicles, vehicle_capacity, params, use_2_opt=True, elitism_weight=1.0):
         self.depot_coord = depot_coord
         self.customer_coords = customer_coords
@@ -23,19 +18,16 @@ class ACO_CVRP_Solver:
         self.n_cities = len(self.cities_coords)
         self.n_customers = len(self.customer_coords)
         self.n_vehicles = n_vehicles
-        self.vehicle_capacity = float(vehicle_capacity)
-        self.effective_vehicle_capacity = self.vehicle_capacity * 1.05
+        self.vehicle_capacity = float(vehicle_capacity) # CORRECCIÓN: Se usa la capacidad estricta.
 
         self.depot_index = 0
         self.distances = self._calculate_distance_matrix_haversine()
         
-        # Parámetros del algoritmo ACO
         self.alpha = float(params.get('alpha', 1.0))
         self.beta = float(params.get('beta', 2.0))
         self.rho = float(params.get('rho', 0.1))
         self.Q = float(params.get('Q', 100))
         
-        # Parámetros de mejoras
         self.use_2_opt = use_2_opt
         self.elitism_weight = float(elitism_weight)
 
@@ -64,7 +56,8 @@ class ACO_CVRP_Solver:
     def _select_next_city(self, current_city_idx, unvisited_customers, current_vehicle_load):
         feasible_customers = [
             cust_idx for cust_idx in unvisited_customers
-            if current_vehicle_load + self.demands[cust_idx] <= self.effective_vehicle_capacity
+            # CORRECCIÓN: Se comprueba contra la capacidad estricta del vehículo.
+            if current_vehicle_load + self.demands[cust_idx] <= self.vehicle_capacity
         ]
         if not feasible_customers:
             return None
@@ -84,8 +77,7 @@ class ACO_CVRP_Solver:
         return random.choices(feasible_customers, weights=probabilities, k=1)[0]
     
     def _two_opt(self, route):
-        """Mejora una ruta individual usando la heurística 2-opt."""
-        if len(route) <= 4: # No se puede optimizar una ruta con 2 o menos clientes
+        if len(route) <= 4:
             return route
         
         improved = True
@@ -94,18 +86,12 @@ class ACO_CVRP_Solver:
             for i in range(1, len(route) - 2):
                 for j in range(i + 1, len(route)):
                     if j == i + 1: continue
-                    
-                    # Nodos actuales: (i-1, i) y (j-1, j)
-                    # Nuevos nodos: (i-1, j-1) y (i, j)
                     current_dist = self.distances[route[i-1], route[i]] + self.distances[route[j-1], route[j]]
                     new_dist = self.distances[route[i-1], route[j-1]] + self.distances[route[i], route[j]]
-
                     if new_dist < current_dist:
-                        # Realizar el intercambio
                         route[i:j] = route[j-1:i-1:-1]
                         improved = True
         return route
-
 
     def _construct_solution_for_ant(self):
         solution_routes = []
@@ -130,7 +116,6 @@ class ACO_CVRP_Solver:
             
             current_route.append(self.depot_index)
             
-            # Aplicar búsqueda local 2-opt si está habilitada
             if self.use_2_opt:
                 current_route = self._two_opt(current_route)
 
@@ -155,10 +140,8 @@ class ACO_CVRP_Solver:
                         best_overall_cost = cost
                         best_overall_routes = routes
 
-            # 1. Evaporación de feromonas
             self.pheromones *= (1.0 - self.rho)
 
-            # 2. Depósito de feromonas por las hormigas de la iteración
             for sol in iteration_solutions:
                 if sol['cost'] > 0:
                     deposit_value = self.Q / sol['cost']
@@ -168,7 +151,6 @@ class ACO_CVRP_Solver:
                             self.pheromones[u, v] += deposit_value
                             self.pheromones[v, u] += deposit_value
 
-            # 3. Depósito Elitista (refuerza la mejor solución global)
             if best_overall_routes:
                 elitist_deposit = self.elitism_weight * (self.Q / best_overall_cost)
                 for route in best_overall_routes:
@@ -185,13 +167,10 @@ class ACO_CVRP_Solver:
     def evaluate_solution(self, solution):
         solution_routes = solution.get('routes', [])
         if not solution_routes: 
-            return {'total_distance_km': 0}
+            return {}
 
-        total_dist = sum(self.distances[route[i], route[i+1]] for route in solution_routes for i in range(len(route) - 1))
-        
         metrics = {}
         metrics['num_vehicles_used'] = len(solution_routes)
-        metrics['total_distance_km'] = total_dist
         metrics['route_details'] = []
         all_visited_customers = set()
         total_demand_serviced = 0
@@ -206,7 +185,6 @@ class ACO_CVRP_Solver:
                 'sequence': route_customers, 'distance': dist, 'load': load,
                 'stops': len(route_customers), 'utilization': util_percent
             })
-            
             for c in route_customers: 
                 all_visited_customers.add(c)
             total_demand_serviced += load
