@@ -155,8 +155,8 @@ with tab_config:
     with col1:
         st.subheader("1. Datos del Problema")
         uploaded_file = st.file_uploader("Sube tu archivo de clientes (delimitado por ';')", type="csv")
-        depot_lat = st.number_input("Latitud Depósito", value=4.685, format="%.5f")
-        depot_lon = st.number_input("Longitud Depósito", value=-74.140, format="%.5f")
+        depot_lat = st.number_input("Latitud Depósito", value=3,90089, format="%.5f")
+        depot_lon = st.number_input("Longitud Depósito", value=-76,29783, format="%.5f")
         n_vehicles = st.number_input("Número de Vehículos", min_value=1, value=10)
         vehicle_capacity = st.number_input("Capacidad por Vehículo", min_value=1, value=150)
     with col2:
