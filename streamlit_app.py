@@ -11,32 +11,48 @@ from solver import ACO_CVRP_Solver
 st.set_page_config(
     page_title="Optimizador de Rutas (CVRP)",
     page_icon="🚚",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# --- Funciones de la Aplicación ---
+# --- Estado de la Sesión ---
+# Inicializar el estado para guardar los resultados entre ejecuciones
+if 'solution' not in st.session_state:
+    st.session_state.solution = None
+if 'evaluation' not in st.session_state:
+    st.session_state.evaluation = None
+if 'solver' not in st.session_state:
+    st.session_state.solver = None
+if 'customer_data' not in st.session_state:
+    st.session_state.customer_data = None
 
+
+# --- Funciones de la Aplicación ---
 @st.cache_data
-def load_data(file):
-    """Carga y procesa el archivo CSV de clientes."""
-    if file is None:
+def load_data(uploaded_file):
+    """
+    Carga y procesa el archivo CSV de clientes.
+    Adaptado para delimitador de punto y coma y nuevas columnas.
+    """
+    if uploaded_file is None:
         return None
     try:
-        df = pd.read_csv(file)
-        # Detección flexible de columnas
+        df = pd.read_csv(uploaded_file, delimiter=';')
+        
         column_map = {
-            'lat': ['latitud_aproximada', 'latitud', 'lat'],
-            'lon': ['longitud_aproximada', 'longitud', 'lon', 'lng'],
-            'demand': ['ctd paquetes', 'demanda', 'demand', 'volumen']
+            'lat': ['lat'],
+            'lon': ['lon'],
+            'demand': ['pasajeros'],
+            'name': ['nombre']
         }
         
         rename_dict = {}
         for generic_name, possible_names in column_map.items():
             found = False
             for name in possible_names:
-                if name in df.columns:
-                    rename_dict[name] = generic_name
+                # Búsqueda insensible a mayúsculas/minúsculas y espacios
+                if name.lower().strip() in [c.lower().strip() for c in df.columns]:
+                    original_col_name = [c for c in df.columns if c.lower().strip() == name.lower().strip()][0]
+                    rename_dict[original_col_name] = generic_name
                     found = True
                     break
             if not found:
@@ -44,9 +60,13 @@ def load_data(file):
                 return None
         
         df = df.rename(columns=rename_dict)
-        df = df[['lat', 'lon', 'demand']]
-        df = df.astype(float)
+        
+        # Seleccionar y convertir tipos
+        required_cols = ['name', 'lat', 'lon', 'demand']
+        df = df[required_cols]
+        df[['lat', 'lon', 'demand']] = df[['lat', 'lon', 'demand']].astype(float)
         return df
+
     except Exception as e:
         st.error(f"Error al procesar el archivo: {e}")
         return None
@@ -56,44 +76,41 @@ def get_pydeck_chart(df_customers, depot_coord, solution_routes, solver_coords):
     if df_customers is None:
         return None
 
-    # Colores para las rutas
     route_colors = [
         [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0], [0, 255, 255], 
-        [255, 0, 255], [128, 0, 0], [0, 128, 0], [0, 0, 128], [128, 128, 0]
+        [255, 0, 255], [128, 0, 0], [0, 128, 0], [0, 0, 128], [128, 128, 0],
+        [128, 0, 128], [0, 128, 128], [255, 165, 0], [255, 20, 147], [60, 179, 113]
     ]
 
-    # Capa de Clientes
     customer_layer = pdk.Layer(
         "ScatterplotLayer",
         data=df_customers,
         get_position=["lon", "lat"],
         get_color=[0, 0, 200, 160],
-        get_radius=100,
+        get_radius=2000,
         pickable=True,
-        tooltip={"text": "Cliente\nLat: {lat}, Lon: {lon}\nDemanda: {demand}"}
+        auto_highlight=True,
+        tooltip={"html": "<b>Cliente:</b> {name}<br/><b>Demanda:</b> {demand}"}
     )
     
-    # Capa de Depósito
     depot_df = pd.DataFrame([{'lat': depot_coord[1], 'lon': depot_coord[0]}])
     depot_layer = pdk.Layer(
-        "ScatterplotLayer",
+        "IconLayer",
         data=depot_df,
+        get_icon="(data) => ({ url: 'https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/icon-atlas.png', width: 128, height: 128, anchorY: 128, mask: true })",
         get_position=["lon", "lat"],
-        get_color=[200, 0, 0, 255],
-        get_radius=250,
+        size_scale=15,
+        get_size=5,
+        get_color=[200, 30, 0, 255],
         pickable=True,
-        tooltip={"text": "Depósito Central"}
+        tooltip={"html": "<b>Depósito Central</b>"}
     )
     
     layers = [customer_layer, depot_layer]
 
-    # Capas de Rutas
     if solution_routes:
         for i, route in enumerate(solution_routes):
-            path_data = []
-            for city_idx in route:
-                lon, lat = solver_coords[city_idx]
-                path_data.append([lon, lat])
+            path_data = [[solver_coords[city_idx][0], solver_coords[city_idx][1]] for city_idx in route]
             
             route_layer = pdk.Layer(
                 "PathLayer",
@@ -103,14 +120,15 @@ def get_pydeck_chart(df_customers, depot_coord, solution_routes, solver_coords):
                 width_min_pixels=3,
                 get_color="color",
                 pickable=True,
-                tooltip={"text": "{name}"}
+                auto_highlight=True,
+                tooltip={"html": "<b>{name}</b>"}
             )
             layers.append(route_layer)
     
     view_state = pdk.ViewState(
-        latitude=depot_coord[1],
-        longitude=depot_coord[0],
-        zoom=11,
+        latitude=df_customers['lat'].mean(),
+        longitude=df_customers['lon'].mean(),
+        zoom=6,
         pitch=45,
     )
 
@@ -120,148 +138,148 @@ def get_pydeck_chart(df_customers, depot_coord, solution_routes, solver_coords):
         map_style="mapbox://styles/mapbox/light-v10",
         tooltip={"style": {"backgroundColor": "steelblue", "color": "white"}}
     )
-    
-# --- Interfaz de Usuario ---
+
+# --- Interfaz Principal ---
 
 st.title("🚚 Optimizador de Rutas Vehiculares (CVRP)")
-st.write("Esta herramienta utiliza un **Algoritmo de Colonia de Hormigas (ACO)** para encontrar las rutas más eficientes para una flota de vehículos, minimizando la distancia total recorrida.")
+st.write("Esta herramienta utiliza un **Algoritmo de Colonia de Hormigas (ACO)** para encontrar las rutas más eficientes, minimizando la distancia total recorrida.")
 
-# --- Barra Lateral de Configuración ---
-with st.sidebar:
-    st.header("⚙️ Configuración")
+# --- Definición de Pestañas ---
+tab_config, tab_results, tab_about = st.tabs(["⚙️ Configuración y Ejecución", "📊 Resultados", "👨‍💻 Acerca de"])
+
+# --- Pestaña 1: Configuración ---
+with tab_config:
+    st.header("Parámetros de Entrada")
     
-    st.subheader("1. Cargar Datos de Clientes")
-    uploaded_file = st.file_uploader("Sube un archivo CSV", type="csv")
-    use_example = st.checkbox("Usar datos de ejemplo", value=True)
-
-    if use_example:
-        uploaded_file = "data/sample_data.csv"
-
-    df_customers = load_data(uploaded_file)
+    col1, col2 = st.columns(2)
     
-    if df_customers is not None:
-        st.success(f"Cargados {len(df_customers)} clientes.")
-    else:
-        st.warning("Por favor, sube un archivo CSV o usa los datos de ejemplo.")
-        st.stop()
-    
-    st.subheader("2. Parámetros del Problema")
-    depot_lat = st.number_input("Latitud Depósito", value=3.90089, format="%.5f")
-    depot_lon = st.number_input("Longitud Depósito", value=-76.29783, format="%.5f")
-    n_vehicles = st.number_input("Número de Vehículos", min_value=1, value=10)
-    vehicle_capacity = st.number_input("Capacidad por Vehículo", min_value=1, value=150)
+    with col1:
+        st.subheader("1. Datos del Problema")
+        uploaded_file = st.file_uploader("Sube tu archivo de clientes (delimitado por ';')", type="csv")
 
-    st.subheader("3. Parámetros del Algoritmo (ACO)")
-    with st.expander("Ajustes Avanzados"):
+        depot_lat = st.number_input("Latitud Depósito", value=4.685, format="%.5f")
+        depot_lon = st.number_input("Longitud Depósito", value=-74.140, format="%.5f")
+        n_vehicles = st.number_input("Número de Vehículos", min_value=1, value=10)
+        vehicle_capacity = st.number_input("Capacidad por Vehículo", min_value=1, value=150)
+
+    with col2:
+        st.subheader("2. Parámetros del Algoritmo (ACO)")
         n_ants = st.slider("Número de Hormigas", 5, 100, 30)
         n_iterations = st.slider("Número de Iteraciones", 10, 1000, 200)
         alpha = st.slider("Alpha (α)", 0.1, 5.0, 1.0, 0.1, help="Influencia de la feromona.")
         beta = st.slider("Beta (β)", 0.1, 5.0, 2.0, 0.1, help="Influencia de la visibilidad (distancia).")
-        rho = st.slider("Rho (ρ)", 0.01, 1.0, 0.1, 0.01, help="Tasa de evaporación de la feromona.")
+        rho = st.slider("Rho (ρ)", 0.01, 1.0, 0.5, 0.01, help="Tasa de evaporación de la feromona.")
         q_val = st.number_input("Q", value=100, help="Constante de depósito de feromona.")
 
+    st.divider()
     start_button = st.button("🚀 Iniciar Optimización", type="primary", use_container_width=True)
+    
+    # Lógica de carga de datos
+    if uploaded_file:
+        st.session_state.customer_data = load_data(uploaded_file)
+        if st.session_state.customer_data is not None:
+             st.success(f"Archivo cargado correctamente: {len(st.session_state.customer_data)} clientes encontrados.")
 
-# --- Área Principal de Resultados ---
-
-# Inicializar el estado de la sesión para guardar los resultados
-if 'solution' not in st.session_state:
-    st.session_state.solution = None
-if 'evaluation' not in st.session_state:
-    st.session_state.evaluation = None
-if 'solver' not in st.session_state:
-    st.session_state.solver = None
-
-# Lógica de Optimización
-if start_button:
-    with st.spinner("Optimizando rutas... El algoritmo está trabajando."):
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
-        
-        def progress_callback(iteration, total_iterations, best_cost):
-            """Función para actualizar la UI durante la optimización."""
-            progress = iteration / total_iterations
-            progress_bar.progress(progress)
-            cost_str = f"{best_cost:.2f}" if best_cost != float('inf') else "N/A"
-            progress_text.text(f"Iteración {iteration}/{total_iterations} - Mejor costo actual: {cost_str} km")
-
-        params_aco = {'alpha': alpha, 'beta': beta, 'rho': rho, 'Q': q_val}
-        depot_coord = (depot_lon, depot_lat)
-        
-        solver = ACO_CVRP_Solver(
-            depot_coord=depot_coord,
-            customer_coords=df_customers[['lon', 'lat']].values.tolist(),
-            customer_demands=df_customers['demand'].values.tolist(),
-            n_vehicles=n_vehicles,
-            vehicle_capacity=vehicle_capacity,
-            params=params_aco
-        )
-
-        best_routes, best_cost = solver.solve(
-            n_ants=n_ants, 
-            n_iterations=n_iterations,
-            progress_callback=progress_callback
-        )
-        
-        progress_text.text("Optimización completada. Generando resultados...")
-
-        if not best_routes:
-            st.error("No se pudo encontrar una solución válida. Intenta ajustar los parámetros (ej. más vehículos, mayor capacidad o más iteraciones).")
-            st.session_state.solution = None
-            st.session_state.evaluation = None
-            st.session_state.solver = None
+    # Lógica de Optimización al presionar el botón
+    if start_button:
+        if st.session_state.customer_data is None:
+            st.error("Por favor, carga un archivo de datos de clientes válido antes de iniciar la optimización.")
         else:
-            evaluation = solver.evaluate_solution({'routes': best_routes, 'cost': best_cost})
-            st.session_state.solution = {'routes': best_routes, 'cost': best_cost}
-            st.session_state.evaluation = evaluation
-            st.session_state.solver = solver # Guardar el objeto solver completo
+            with st.spinner("Optimizando rutas... El algoritmo está trabajando, por favor espera."):
+                progress_bar = st.progress(0)
+                progress_text = st.empty()
+                
+                def progress_callback(iteration, total_iterations, best_cost):
+                    progress = iteration / total_iterations
+                    progress_bar.progress(progress)
+                    cost_str = f"{best_cost:,.2f}" if best_cost != float('inf') else "N/A"
+                    progress_text.text(f"Iteración {iteration}/{total_iterations} - Mejor costo: {cost_str} km")
+
+                params_aco = {'alpha': alpha, 'beta': beta, 'rho': rho, 'Q': q_val}
+                depot_coord = (depot_lon, depot_lat)
+                
+                solver = ACO_CVRP_Solver(
+                    depot_coord=depot_coord,
+                    customer_coords=st.session_state.customer_data[['lon', 'lat']].values.tolist(),
+                    customer_demands=st.session_state.customer_data['demand'].values.tolist(),
+                    n_vehicles=n_vehicles,
+                    vehicle_capacity=vehicle_capacity,
+                    params=params_aco
+                )
+
+                best_routes, best_cost = solver.solve(n_ants, n_iterations, progress_callback)
+                
+                if not best_routes:
+                    st.error("No se encontró una solución válida. Prueba ajustar los parámetros (ej. más vehículos, mayor capacidad o más iteraciones).")
+                    st.session_state.solution = None
+                else:
+                    evaluation = solver.evaluate_solution({'routes': best_routes, 'cost': best_cost})
+                    st.session_state.solution = {'routes': best_routes, 'cost': best_cost}
+                    st.session_state.evaluation = evaluation
+                    st.session_state.solver = solver
+                    st.success("¡Optimización completada! Ve a la pestaña 'Resultados' para ver la solución.")
+                
+                progress_bar.empty()
+                progress_text.empty()
+
+# --- Pestaña 2: Resultados ---
+with tab_results:
+    st.header("Visualización de Resultados")
+    
+    if st.session_state.solution:
+        eval_data = st.session_state.evaluation
         
-        progress_bar.empty()
-        progress_text.empty()
+        st.subheader("📈 Métricas Clave de la Solución")
+        cols = st.columns(4)
+        cols[0].metric("Costo Total", f"{eval_data['total_distance_km']:,.2f} km")
+        cols[1].metric("Vehículos Usados", f"{eval_data['num_vehicles_used']} / {st.session_state.solver.n_vehicles}")
+        cols[2].metric("Clientes Visitados", f"{eval_data['customers_visited_count']} / {st.session_state.solver.n_customers}")
+        cols[3].metric("Uso Promedio Capacidad", f"{eval_data['avg_vehicle_utilization_percent']:.1f}%")
 
-# Mostrar Resultados si existen
-if st.session_state.solution:
-    st.header("📊 Resultados de la Optimización")
-    
-    eval_data = st.session_state.evaluation
-    
-    # 1. Métricas Clave
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Costo Total", f"{eval_data['total_distance_km']:.2f} km")
-    col2.metric("Vehículos Usados", f"{eval_data['num_vehicles_used']} / {n_vehicles}")
-    col3.metric("Clientes Visitados", f"{eval_data['customers_visited_count']} / {len(df_customers)}")
-    col4.metric("Uso Promedio Capacidad", f"{eval_data['avg_vehicle_utilization_percent']:.1f}%")
+        st.subheader("🗺️ Visualización de Rutas en el Mapa")
+        pydeck_chart = get_pydeck_chart(
+            st.session_state.customer_data, 
+            st.session_state.solver.depot_coord,
+            st.session_state.solution['routes'],
+            st.session_state.solver.cities_coords
+        )
+        if pydeck_chart:
+            st.pydeck_chart(pydeck_chart)
+        
+        st.subheader("📋 Detalles por Ruta")
+        for i, route_detail in enumerate(eval_data['route_details']):
+            with st.expander(f"**Ruta {i+1}** | Distancia: {route_detail['distance']:.2f} km | Carga: {route_detail['load']:.0f} ({route_detail['utilization']:.1f}%)"):
+                route_customer_indices = route_detail['sequence']
+                route_df = st.session_state.customer_data.iloc[[idx - 1 for idx in route_customer_indices]].copy()
+                route_df.insert(0, "Orden", range(1, len(route_df) + 1))
+                st.dataframe(route_df[['Orden', 'name', 'demand', 'lat', 'lon']])
 
-    # 2. Mapa
-    st.subheader("🗺️ Visualización de Rutas en el Mapa")
-    pydeck_chart = get_pydeck_chart(
-        df_customers, 
-        (depot_lon, depot_lat),
-        st.session_state.solution['routes'],
-        st.session_state.solver.cities_coords
-    )
-    if pydeck_chart:
-        st.pydeck_chart(pydeck_chart)
     else:
-        st.warning("No se pudo generar el mapa.")
+        st.info("Completa la configuración en la pestaña 'Configuración y Ejecución' y haz clic en 'Iniciar Optimización' para ver los resultados aquí.")
+        if st.session_state.customer_data is not None:
+             st.subheader("🗺️ Vista Previa de Ubicaciones de Clientes")
+             pydeck_chart = get_pydeck_chart(st.session_state.customer_data, (depot_lon, depot_lat), None, None)
+             st.pydeck_chart(pydeck_chart)
 
-    # 3. Detalles por Ruta
-    st.subheader("📋 Detalles por Ruta")
-    for i, route_detail in enumerate(eval_data['route_details']):
-        color_index = i % 10 # Para que coincida con los colores del mapa
-        with st.expander(f"**Ruta {i+1}** (Distancia: {route_detail['distance']:.2f} km, Carga: {route_detail['load']:.0f} / {vehicle_capacity})"):
-            st.write(f"**Paradas:** {route_detail['stops']}")
-            st.write(f"**Utilización de capacidad:** {route_detail['utilization']:.1f}%")
-            
-            # Mapear índices a coordenadas para mostrar en tabla
-            route_customer_indices = route_detail['sequence']
-            route_df = df_customers.iloc[[idx - 1 for idx in route_customer_indices]].copy()
-            route_df.insert(0, "Orden", range(1, len(route_df) + 1))
-            st.dataframe(route_df)
 
-else:
-    st.info("Configura los parámetros en la barra lateral y haz clic en 'Iniciar Optimización' para ver los resultados.")
-    st.subheader("🗺️ Vista Previa del Mapa de Clientes")
-    pydeck_chart = get_pydeck_chart(df_customers, (depot_lon, depot_lat), None, None)
-    if pydeck_chart:
-        st.pydeck_chart(pydeck_chart)
+# --- Pestaña 3: Acerca de ---
+with tab_about:
+    st.header("Acerca del Proyecto y del Autor")
+    st.image("https://i.imgur.com/8bf3k8u.png") # 
+    st.markdown("""
+    Esta aplicación fue desarrollada como una herramienta avanzada para la optimización logística, aplicando metaheurísticas para resolver problemas complejos de ruteo de vehículos.
+    
+    ### Autor
+    - **Nombre:** (Aquí va tu nombre)
+    - **Contacto:** (Tu email o red de contacto)
+    - **LinkedIn:** [Tu Perfil](https://www.linkedin.com/in/tu-usuario/)
+    
+    ### Tecnología Utilizada
+    - **Framework:** Streamlit
+    - **Algoritmo:** Optimización por Colonia de Hormigas (ACO)
+    - **Visualización:** Pydeck (deck.gl)
+    - **Lenguaje:** Python
+    
+    *El código de esta aplicación ha sido analizado y potenciado con la asistencia de IA para mejorar su estructura, eficiencia y experiencia de usuario.*
+    """)
+
