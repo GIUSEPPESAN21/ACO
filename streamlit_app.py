@@ -190,9 +190,9 @@ with tab_config:
                     st.error("No se encontró una solución válida. Prueba ajustar los parámetros.")
                     st.session_state.solution = None
                 else:
-                    final_cost = sum(solver.evaluate_solution({'routes': [route]})['total_distance_km'] for route in best_routes)
+                    # CORRECCIÓN: Se elimina la línea que causaba el error y se usa una lógica más limpia.
                     evaluation = solver.evaluate_solution({'routes': best_routes})
-                    st.session_state.solution = {'routes': best_routes, 'cost': final_cost}
+                    st.session_state.solution = {'routes': best_routes, 'cost': evaluation['total_distance_km']}
                     st.session_state.evaluation = evaluation
                     st.session_state.solver = solver
                     st.success("¡Optimización completada! Ve a la pestaña 'Resultados'.")
