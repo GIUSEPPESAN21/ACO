@@ -31,45 +31,42 @@ if 'customer_data' not in st.session_state:
 def load_data(uploaded_file):
     """
     Carga y procesa el archivo CSV de clientes.
-    Adaptado para delimitador de punto y coma y nuevas columnas.
+    Versión robusta que normaliza las columnas para evitar KeyErrors.
     """
     if uploaded_file is None:
         return None
     try:
         df = pd.read_csv(uploaded_file, delimiter=';')
-        
+
+        # Mapeo de columnas requeridas (origen -> destino)
         column_map = {
-            'lat': ['lat'],
-            'lon': ['lon'],
-            'demand': ['pasajeros'],
-            'name': ['nombre']
+            'nombre': 'name',
+            'lat': 'lat',
+            'lon': 'lon',
+            'pasajeros': 'demand'
         }
-        
-        rename_dict = {}
-        for generic_name, possible_names in column_map.items():
-            found = False
-            for name in possible_names:
-                # Búsqueda insensible a mayúsculas/minúsculas y espacios
-                if name.lower().strip() in [c.lower().strip() for c in df.columns]:
-                    original_col_name = [c for c in df.columns if c.lower().strip() == name.lower().strip()][0]
-                    rename_dict[original_col_name] = generic_name
-                    found = True
-                    break
-            if not found:
-                st.error(f"Error: No se encontró una columna para '{generic_name}'. Opciones válidas: {possible_names}")
+
+        # Normalizar las columnas del DataFrame (minúsculas, sin espacios)
+        df.columns = [col.strip().lower() for col in df.columns]
+
+        # Verificar si todas las columnas de origen requeridas existen
+        for required_col in column_map.keys():
+            if required_col not in df.columns:
+                st.error(f"Error: La columna requerida '{required_col}' no se encontró en el archivo CSV. Columnas encontradas: {df.columns.tolist()}")
                 return None
         
-        df = df.rename(columns=rename_dict)
+        # Renombrar y seleccionar las columnas necesarias
+        df = df.rename(columns=column_map)
+        df = df[list(column_map.values())] # Selecciona ['name', 'lat', 'lon', 'demand']
         
-        # Seleccionar y convertir tipos
-        required_cols = ['name', 'lat', 'lon', 'demand']
-        df = df[required_cols]
+        # Convertir tipos de datos
         df[['lat', 'lon', 'demand']] = df[['lat', 'lon', 'demand']].astype(float)
         return df
 
     except Exception as e:
         st.error(f"Error al procesar el archivo: {e}")
         return None
+
 
 def get_pydeck_chart(df_customers, depot_coord, solution_routes, solver_coords):
     """Crea y devuelve un gráfico de Pydeck con las rutas y puntos."""
@@ -86,7 +83,7 @@ def get_pydeck_chart(df_customers, depot_coord, solution_routes, solver_coords):
         "ScatterplotLayer",
         data=df_customers,
         get_position=["lon", "lat"],
-        get_color=[0, 0, 200, 160],
+        get_fill_color=[0, 0, 200, 160],
         get_radius=2000,
         pickable=True,
         auto_highlight=True,
@@ -95,15 +92,13 @@ def get_pydeck_chart(df_customers, depot_coord, solution_routes, solver_coords):
     
     depot_df = pd.DataFrame([{'lat': depot_coord[1], 'lon': depot_coord[0]}])
     depot_layer = pdk.Layer(
-        "IconLayer",
+        "ScatterplotLayer",
         data=depot_df,
-        get_icon="(data) => ({ url: 'https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/icon-atlas.png', width: 128, height: 128, anchorY: 128, mask: true })",
         get_position=["lon", "lat"],
-        size_scale=15,
-        get_size=5,
-        get_color=[200, 30, 0, 255],
+        get_fill_color=[255, 0, 0, 255],
+        get_radius=3000,
         pickable=True,
-        tooltip={"html": "<b>Depósito Central</b>"}
+        tooltip={"text": "Depósito Central"}
     )
     
     layers = [customer_layer, depot_layer]
@@ -258,14 +253,17 @@ with tab_results:
         st.info("Completa la configuración en la pestaña 'Configuración y Ejecución' y haz clic en 'Iniciar Optimización' para ver los resultados aquí.")
         if st.session_state.customer_data is not None:
              st.subheader("🗺️ Vista Previa de Ubicaciones de Clientes")
-             pydeck_chart = get_pydeck_chart(st.session_state.customer_data, (depot_lon, depot_lat), None, None)
+             # Se definen depot_lon y depot_lat aquí por si el usuario no ha tocado los inputs
+             depot_lon_preview = -74.140 
+             depot_lat_preview = 4.685
+             pydeck_chart = get_pydeck_chart(st.session_state.customer_data, (depot_lon_preview, depot_lat_preview), None, None)
              st.pydeck_chart(pydeck_chart)
 
 
 # --- Pestaña 3: Acerca de ---
 with tab_about:
     st.header("Acerca del Proyecto y del Autor")
-    st.image("https://i.imgur.com/8bf3k8u.png") # 
+    st.image("https://i.imgur.com/8bf3k8u.png")
     st.markdown("""
     Esta aplicación fue desarrollada como una herramienta avanzada para la optimización logística, aplicando metaheurísticas para resolver problemas complejos de ruteo de vehículos.
     
