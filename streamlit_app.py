@@ -34,6 +34,8 @@ def load_data(uploaded_file):
     if uploaded_file is None:
         return None
     try:
+        # Reset the file pointer to the beginning
+        uploaded_file.seek(0)
         df = pd.read_csv(uploaded_file, delimiter=';', encoding='latin1')
         column_map = {'nombre': 'name', 'lat': 'lat', 'lon': 'lon', 'pasajeros': 'demand'}
         df.columns = [col.strip().lower() for col in df.columns]
@@ -105,7 +107,7 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         lon=[depot_coord[0]],
         lat=[depot_coord[1]],
         mode='markers',
-        marker=dict(color='#D62728', size=25, symbol='commercial'), # Icono de edificio comercial
+        marker=dict(color='#D62728', size=25, symbol='star'), # Icono de estrella, más robusto
         hovertext=f"<b>Depósito</b><br>Lon: {depot_coord[0]:.5f}<br>Lat: {depot_coord[1]:.5f}",
         hoverinfo='text',
         name='Depósito'
@@ -153,14 +155,49 @@ tab_config, tab_results, tab_about = st.tabs(["⚙️ Configuración y Ejecució
 
 with tab_config:
     st.header("Parámetros de Entrada")
+    
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("1. Datos del Problema")
         uploaded_file = st.file_uploader("Sube tu archivo de clientes (delimitado por ';')", type="csv")
-        depot_lat = st.number_input("Latitud Depósito", value=4.685, format="%.5f")
-        depot_lon = st.number_input("Longitud Depósito", value=-74.140, format="%.5f")
+
+        # Lógica de selección de depósito
+        depot_lat, depot_lon = 3.90089, -77.030 # Valores por defecto
+
+        if uploaded_file:
+            full_data = load_data(uploaded_file)
+            if full_data is not None:
+                st.success(f"Archivo cargado: {len(full_data)} ubicaciones encontradas.")
+                depot_choices = ["Establecer coordenadas manualmente"] + full_data['name'].tolist()
+                selected_depot_name = st.selectbox(
+                    "Selecciona el punto de partida (Depósito)", 
+                    options=depot_choices, 
+                    key="depot_selector"
+                )
+
+                if selected_depot_name != "Establecer coordenadas manualmente":
+                    depot_row = full_data[full_data['name'] == selected_depot_name].iloc[0]
+                    depot_lat = depot_row['lat']
+                    depot_lon = depot_row['lon']
+                    st.info(f"Usando **{selected_depot_name}** como depósito.")
+                    st.session_state.customer_data = full_data[full_data['name'] != selected_depot_name].reset_index(drop=True)
+                else:
+                    depot_lat = st.number_input("Latitud Depósito", value=depot_lat, format="%.5f")
+                    depot_lon = st.number_input("Longitud Depósito", value=depot_lon, format="%.5f")
+                    st.session_state.customer_data = full_data
+            else:
+                st.session_state.customer_data = None
+        else:
+             st.session_state.customer_data = None
+
+        if st.session_state.customer_data is None and not uploaded_file:
+            depot_lat = st.number_input("Latitud Depósito", value=depot_lat, format="%.5f")
+            depot_lon = st.number_input("Longitud Depósito", value=depot_lon, format="%.5f")
+
         n_vehicles = st.number_input("Número de Vehículos", min_value=1, value=10)
         vehicle_capacity = st.number_input("Capacidad por Vehículo", min_value=1, value=150)
+
     with col2:
         st.subheader("2. Parámetros del Algoritmo (ACO)")
         n_ants = st.slider("Número de Hormigas", 5, 100, 30)
@@ -177,14 +214,9 @@ with tab_config:
     st.divider()
     start_button = st.button("🚀 Iniciar Optimización", type="primary", use_container_width=True)
     
-    if uploaded_file:
-        st.session_state.customer_data = load_data(uploaded_file)
-        if st.session_state.customer_data is not None:
-             st.success(f"Archivo cargado correctamente: {len(st.session_state.customer_data)} clientes encontrados.")
-
     if start_button:
-        if st.session_state.customer_data is None:
-            st.error("Por favor, carga un archivo de datos de clientes válido.")
+        if st.session_state.customer_data is None or st.session_state.customer_data.empty:
+            st.error("Por favor, carga un archivo de datos y asegúrate de que haya clientes para visitar.")
         else:
             with st.spinner("Optimizando rutas... Por favor espera."):
                 progress_bar = st.progress(0)
@@ -269,11 +301,11 @@ with tab_results:
 
     else:
         st.info("Completa y ejecuta la configuración para ver los resultados.")
-        if st.session_state.customer_data is not None:
+        if st.session_state.customer_data is not None and not st.session_state.customer_data.empty:
              st.subheader("🗺️ Vista Previa de Ubicaciones")
              # Utiliza las coordenadas del formulario para la vista previa
-             depot_coord = (depot_lon, depot_lat)
-             plotly_chart = get_plotly_chart(st.session_state.customer_data, depot_coord, None, None)
+             depot_coord_preview = (depot_lon, depot_lat)
+             plotly_chart = get_plotly_chart(st.session_state.customer_data, depot_coord_preview, None, None)
              st.plotly_chart(plotly_chart, use_container_width=True)
 
 with tab_about:
