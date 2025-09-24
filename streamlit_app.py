@@ -54,7 +54,8 @@ def load_data(uploaded_file):
 
 def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
     """
-    Crea y devuelve un gráfico de Plotly con las rutas y puntos sobre un mapa.
+    Crea y devuelve un gráfico de Plotly con las rutas y puntos sobre un mapa,
+    con encuadre automático para mejor visualización.
     """
     if df_customers is None:
         return go.Figure()
@@ -91,7 +92,6 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         lat=df_customers['lat'],
         mode='markers+text',
         marker=dict(color='blue', size=14),
-        # Se muestra el índice + 1 como número del cliente
         text=[f"<b>{i+1}</b>" for i in df_customers.index],
         textfont=dict(color='white', size=8),
         textposition='middle center',
@@ -109,6 +109,12 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         name='Depósito'
     ))
 
+    # --- MEJORA: Calcular el centro del mapa para encuadrar todos los puntos ---
+    all_lons = df_customers['lon'].tolist() + [depot_coord[0]]
+    all_lats = df_customers['lat'].tolist() + [depot_coord[1]]
+    center_lon = np.mean(all_lons)
+    center_lat = np.mean(all_lats)
+    
     # 4. Actualizar layout para usar Mapbox
     fig.update_layout(
         title='<b>Mejor Solución de Ruteo Encontrada</b>',
@@ -118,8 +124,8 @@ def get_plotly_chart(df_customers, depot_coord, solution_routes, solver):
         hovermode='closest',
         mapbox=dict(
             style="open-street-map",
-            center=dict(lon=depot_coord[0], lat=depot_coord[1]),
-            zoom=10
+            center=dict(lon=center_lon, lat=center_lat), # Usa el centro calculado
+            zoom=9 # Un nivel de zoom inicial razonable
         )
     )
     return fig
