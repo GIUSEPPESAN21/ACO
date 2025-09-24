@@ -138,7 +138,7 @@ def get_pydeck_chart(df_customers, depot_coord, solution_routes, solver_coords):
 # --- Interfaz Principal ---
 
 st.title("🚚 Optimizador de Rutas Vehiculares (CVRP)")
-st.write("Esta herramienta utiliza un **Algoritmo de Colonia de Hormigas (ACO)** para encontrar las rutas más eficientes, minimizando la distancia total recorrida.")
+st.write("Esta herramienta utiliza un **Algoritmo de Colonia de Hormigas (ACO)** potenciado para encontrar las rutas más eficientes.")
 
 # --- Definición de Pestañas ---
 tab_config, tab_results, tab_about = st.tabs(["⚙️ Configuración y Ejecución", "📊 Resultados", "👨‍💻 Acerca de"])
@@ -166,6 +166,11 @@ with tab_config:
         beta = st.slider("Beta (β)", 0.1, 5.0, 2.0, 0.1, help="Influencia de la visibilidad (distancia).")
         rho = st.slider("Rho (ρ)", 0.01, 1.0, 0.5, 0.01, help="Tasa de evaporación de la feromona.")
         q_val = st.number_input("Q", value=100, help="Constante de depósito de feromona.")
+        
+        st.subheader("3. Mejoras de Potencia")
+        use_2_opt = st.toggle("Búsqueda Local (2-opt)", value=True, help="Mejora las rutas para evitar cruces. Aumenta la calidad a costa de mayor tiempo de cálculo.")
+        elitism_weight = st.slider("Peso de Elitismo", 1.0, 10.0, 3.0, 0.5, help="Refuerza la mejor ruta encontrada para acelerar la convergencia.")
+
 
     st.divider()
     start_button = st.button("🚀 Iniciar Optimización", type="primary", use_container_width=True)
@@ -200,7 +205,9 @@ with tab_config:
                     customer_demands=st.session_state.customer_data['demand'].values.tolist(),
                     n_vehicles=n_vehicles,
                     vehicle_capacity=vehicle_capacity,
-                    params=params_aco
+                    params=params_aco,
+                    use_2_opt=use_2_opt,
+                    elitism_weight=elitism_weight
                 )
 
                 best_routes, best_cost = solver.solve(n_ants, n_iterations, progress_callback)
@@ -209,8 +216,10 @@ with tab_config:
                     st.error("No se encontró una solución válida. Prueba ajustar los parámetros (ej. más vehículos, mayor capacidad o más iteraciones).")
                     st.session_state.solution = None
                 else:
-                    evaluation = solver.evaluate_solution({'routes': best_routes, 'cost': best_cost})
-                    st.session_state.solution = {'routes': best_routes, 'cost': best_cost}
+                    # Recalcular el costo final después de la optimización por si 2-opt hizo mejoras finales
+                    final_cost = sum(solver.evaluate_solution({'routes': [route], 'cost': 0})['total_distance_km'] for route in best_routes)
+                    evaluation = solver.evaluate_solution({'routes': best_routes, 'cost': final_cost})
+                    st.session_state.solution = {'routes': best_routes, 'cost': final_cost}
                     st.session_state.evaluation = evaluation
                     st.session_state.solver = solver
                     st.success("¡Optimización completada! Ve a la pestaña 'Resultados' para ver la solución.")
@@ -275,9 +284,10 @@ with tab_about:
     
     ### Tecnología Utilizada
     - **Framework:** Streamlit
-    - **Algoritmo:** Optimización por Colonia de Hormigas (ACO)
+    - **Algoritmo:** Optimización por Colonia de Hormigas (ACO) con Elitismo y Búsqueda Local (2-opt).
     - **Visualización:** Pydeck (deck.gl)
     - **Lenguaje:** Python
     
     *El código de esta aplicación ha sido analizado y potenciado con la asistencia de IA para mejorar su estructura, eficiencia y experiencia de usuario.*
     """)
+
