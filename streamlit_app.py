@@ -16,7 +16,8 @@ st.set_page_config(page_title="Optimizador de Rutas (CVRP-ACO)", page_icon="🚚
 
 # --- Estado de la Sesión ---
 if 'solution' not in st.session_state: st.session_state.solution = None
-if 'evaluation' not in st.session_state.evaluation = None
+# CORRECCIÓN DE SINTAXIS APLICADA EN LA LÍNEA 19
+if 'evaluation' not in st.session_state: st.session_state.evaluation = None
 if 'solver' not in st.session_state: st.session_state.solver = None
 if 'customer_data' not in st.session_state: st.session_state.customer_data = None
 if 'depot_lat' not in st.session_state: st.session_state.depot_lat = 3.90089
@@ -35,7 +36,7 @@ Cliente 6,3.86906,-76.3023,12
 """
     return pd.read_csv(StringIO(csv_data))
 
-# --- FUNCIÓN CORREGIDA ---
+# --- FUNCIÓN load_data CORREGIDA (LÍNEA 79) ---
 @st.cache_data
 def load_data(uploaded_file):
     if uploaded_file is None: return None
