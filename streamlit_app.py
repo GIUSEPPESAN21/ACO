@@ -16,7 +16,7 @@ st.set_page_config(page_title="Optimizador de Rutas (CVRP-ACO)", page_icon="🚚
 
 # --- Estado de la Sesión ---
 if 'solution' not in st.session_state: st.session_state.solution = None
-if 'evaluation' not in st.session_state: st.session_state.evaluation = None
+if 'evaluation' not in st.session_state.evaluation = None
 if 'solver' not in st.session_state: st.session_state.solver = None
 if 'customer_data' not in st.session_state: st.session_state.customer_data = None
 if 'depot_lat' not in st.session_state: st.session_state.depot_lat = 3.90089
@@ -72,6 +72,10 @@ def load_data(uploaded_file):
             df_renamed['name'] = [f"Cliente {i+1}" for i in range(len(df_renamed))]
 
         df_renamed[['lat', 'lon', 'demand']] = df_renamed[['lat', 'lon', 'demand']].astype(float)
+        
+        # CORRECCIÓN APLICADA: Eliminar filas con NaN en las columnas críticas
+        df_renamed.dropna(subset=['lat', 'lon', 'demand'], inplace=True) 
+        
         return df_renamed
     except Exception as e:
         st.error(f"Error al procesar el archivo: {e}")
